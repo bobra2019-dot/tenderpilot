@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, db, ingest, notify, scheduler, scoring, sources as src_mod
+from . import ai, billing, db, ingest, notify, scheduler, scoring, sources as src_mod
 from .catalog import CATEGORIES, CATEGORY_BY_ID, PLATFORM_BY_ID, PLATFORMS, REGIONS, STAGES
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -379,6 +379,13 @@ class AnalyzeIn(BaseModel):
 
 @app.post("/api/tenders/{tid}/analyze")
 async def analyze_tender(tid: int, data: AnalyzeIn = AnalyzeIn(), user=Depends(editor_user)):
+    _conn = db.connect()
+    try:
+        _ok, _msg = billing.consume_analysis(_conn, user["id"])
+    finally:
+        _conn.close()
+    if not _ok:
+        raise HTTPException(402, _msg)
     conn = db.connect()
     try:
         row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
@@ -567,6 +574,13 @@ class ParseIn(BaseModel):
 
 @app.post("/api/tenders/parse")
 async def parse_tender(data: ParseIn, user=Depends(editor_user)):
+    _conn = db.connect()
+    try:
+        _ok, _msg = billing.consume_analysis(_conn, user["id"])
+    finally:
+        _conn.close()
+    if not _ok:
+        raise HTTPException(402, _msg)
     text = data.text or ""
     note = None
     if data.url:
@@ -756,8 +770,19 @@ def admin_overview(user=Depends(admin_user)):
             "SELECT * FROM ingest_log ORDER BY id DESC LIMIT 12").fetchall()]
     finally:
         conn.close()
+    plans_by_user = {}
+    try:
+        conn2 = db.connect()
+        try:
+            for r in conn2.execute("SELECT id, plan FROM users").fetchall():
+                plans_by_user[r["id"]] = {"plan": r["plan"] or "trial"}
+        finally:
+            conn2.close()
+    except Exception:
+        plans_by_user = {}
     return {
         "users": users,
+        "plans_by_user": plans_by_user,
         "registration": reg,
         "roles": db.ROLES,
         "statuses": db.STATUSES,
@@ -874,6 +899,144 @@ def change_password(data: PasswordIn, user=Depends(current_user)):
             raise HTTPException(400, "Старый пароль неверен")
         db.update_user(conn, user["id"], {"password": data.new_password})
         return {"ok": True}
+    finally:
+        conn.close()
+
+
+
+
+# ---------------- тарифы и оплата ----------------
+@app.get("/api/plans")
+def plans_public():
+    """Публично: тарифы для страницы продаж и экрана оплаты."""
+    conn = db.connect()
+    try:
+        pay_cfg = billing.provider_config(conn)
+    finally:
+        conn.close()
+    return {
+        "plans": list(billing.PLANS.values()),
+        "payment": {"invoice": True, "card": pay_cfg["enabled"], "provider": pay_cfg["provider"]},
+    }
+
+
+@app.get("/api/billing")
+def billing_get(user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        return billing.get_billing(conn, user["id"])
+    finally:
+        conn.close()
+
+
+class InvoiceIn(BaseModel):
+    plan: str
+    period: str = "month"
+    note: str = ""
+
+
+@app.post("/api/billing/invoice")
+def billing_invoice(data: InvoiceIn, user=Depends(current_user)):
+    """Выставляет счёт на оплату и возвращает готовый текст для печати/отправки."""
+    conn = db.connect()
+    try:
+        try:
+            payment = billing.create_payment(conn, user["id"], data.plan, data.period, "invoice", data.note)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        company = db.get_company(conn, user["id"])
+        invoice = billing.invoice_text(conn, payment, user, company)
+        return {"ok": True, "payment": payment, "invoice": invoice}
+    finally:
+        conn.close()
+
+
+@app.post("/api/billing/pay")
+def billing_pay(data: InvoiceIn, user=Depends(current_user)):
+    """Онлайн-оплата картой. Пока провайдер не подключён — сообщаем, что делать."""
+    conn = db.connect()
+    try:
+        cfg = billing.provider_config(conn)
+        if not cfg["enabled"]:
+            return {"ok": False, "mode": "invoice",
+                    "message": "Онлайн-оплата картой ещё не подключена. Выставьте счёт — "
+                               "доступ активируем после поступления оплаты."}
+        payment = billing.create_payment(conn, user["id"], data.plan, data.period, "card")
+        return {"ok": True, "mode": "provider", "payment": payment,
+                "message": "Платёж создан, перенаправляем на страницу оплаты провайдера."}
+    finally:
+        conn.close()
+
+
+class BillingSettings(BaseModel):
+    provider: Optional[str] = None
+    shop_id: Optional[str] = None
+    secret_key: Optional[str] = None
+    company_name: Optional[str] = None
+    inn: Optional[str] = None
+    account: Optional[str] = None
+    bank: Optional[str] = None
+
+
+@app.get("/api/admin/billing")
+def admin_billing_get(user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        rows = conn.execute(
+            """SELECT p.*, u.email, u.name FROM payments p JOIN users u ON u.id=p.user_id
+               ORDER BY p.id DESC LIMIT 100""").fetchall()
+        cfg = db.get_setting(conn, "billing", 0, default={}) or {}
+        pays = billing.provider_config(conn)
+        return {"payments": [dict(r) for r in rows], "billing": cfg,
+                "payments_cfg": {k: pays[k] for k in ("provider", "enabled", "shop_id")}}
+    finally:
+        conn.close()
+
+
+@app.put("/api/admin/billing")
+def admin_billing_put(data: BillingSettings, user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        cur = db.get_setting(conn, "billing", 0, default={}) or {}
+        for k, v in data.model_dump().items():
+            if v is not None:
+                cur[k] = v
+        db.set_setting(conn, "billing", cur, 0)
+        return {"ok": True, "billing": cur}
+    finally:
+        conn.close()
+
+
+@app.post("/api/admin/payments/{pid}/paid")
+def admin_mark_paid(pid: int, user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        try:
+            p = billing.mark_paid(conn, pid)
+        except ValueError as e:
+            raise HTTPException(404, str(e))
+        return {"ok": True, "payment": p}
+    finally:
+        conn.close()
+
+
+class PlanIn(BaseModel):
+    plan: str
+    period: str = "month"
+    days: Optional[int] = None
+
+
+@app.patch("/api/admin/users/{uid}/plan")
+def admin_set_plan(uid: int, data: PlanIn, user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        if not db.user_by_id(conn, uid):
+            raise HTTPException(404, "Пользователь не найден")
+        try:
+            info = billing.set_plan(conn, uid, data.plan, data.period, data.days)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
+        return {"ok": True, "billing": info}
     finally:
         conn.close()
 
@@ -1080,8 +1243,27 @@ async def notify_test(user=Depends(editor_user)):
 
 # ---------------- статика ----------------
 @app.get("/")
-def index():
+def index(request: Request):
+    """Гостям — страница продаж, авторизованным — рабочее приложение."""
+    token = request.cookies.get("tp_session") or request.headers.get("x-session")
+    conn = db.connect()
+    try:
+        user = db.user_by_session(conn, token) if token else None
+    finally:
+        conn.close()
+    if user and user.get("status") == "active":
+        return FileResponse(os.path.join(WEB_DIR, "index.html"))
+    return FileResponse(os.path.join(WEB_DIR, "landing.html"))
+
+
+@app.get("/app")
+def app_page():
     return FileResponse(os.path.join(WEB_DIR, "index.html"))
+
+
+@app.get("/pricing")
+def pricing_page():
+    return FileResponse(os.path.join(WEB_DIR, "landing.html"))
 
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

@@ -38,6 +38,12 @@ async function api(path, opts = {}) {
   const headers = opts.body instanceof FormData ? {} : { 'Content-Type': 'application/json' };
   const r = await fetch('/api' + path, { credentials: 'same-origin', ...opts, headers: { ...headers, ...(opts.headers || {}) } });
   if (r.status === 401) { state.user = null; renderLogin(); throw new Error('Требуется вход'); }
+  if (r.status === 402) {
+    const d402 = await r.json().catch(() => ({}));
+    toast(d402.detail || 'Лимит тарифа исчерпан', 'err', 9000);
+    if (state.user) setTimeout(() => { location.hash = '#billing'; }, 900);
+    throw new Error(d402.detail || 'Лимит тарифа исчерпан');
+  }
   const data = await r.json().catch(() => ({}));
   if (!r.ok) throw new Error(data.detail || 'Ошибка ' + r.status);
   return data;
@@ -133,6 +139,7 @@ const NAV = [
   { sep: 'Настройка' },
   { id: 'profile', name: 'Профиль завода', ico: '⚙' },
   { id: 'ai', name: 'Настройки ИИ', ico: '✳' },
+  { id: 'billing', name: 'Тариф и оплата', ico: '₽' },
   { id: 'admin', name: 'Администрирование', ico: '▦', adminOnly: true },
 ];
 
@@ -157,6 +164,7 @@ function renderShell() {
           <div style="line-height:1.3">
             <div style="color:#e6edf9;font-weight:600">${aiOn ? 'ИИ подключён' : 'ИИ в базовом режиме'}</div>
             <div style="color:#7f92b3;font-size:11px">${aiOn ? esc(state.ai.model || '') : 'ключ не задан'}</div>
+            ${state.billing ? `<div style="color:${state.billing.left === 0 ? '#f2a4a4' : '#8fa3c4'};font-size:10.5px;margin-top:2px">${esc(state.billing.plan.name)} · разборов ${state.billing.used}/${state.billing.limit}</div>` : ''}
           </div>
         </div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:12px;padding:0 4px">
@@ -1307,6 +1315,127 @@ function bindSources() {
 }
 
 
+
+/* ================= BILLING (тариф и оплата) ================= */
+async function renderBilling() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-head"><div><h2>Тариф и оплата</h2></div></div>
+    <div class="card"><div class="card-body"><div class="skel" style="height:240px"></div></div></div>`;
+  let b;
+  try { b = await api('/billing'); } catch (e) { content.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  state.billing = b;
+  const paid = (b.plans || []).filter((p) => p.id !== 'trial' && p.id !== 'setup');
+  const usedPct = b.limit ? Math.min(100, Math.round((b.used / b.limit) * 100)) : 0;
+  const barColor = usedPct >= 100 ? 'var(--bad)' : usedPct >= 80 ? '#d97706' : 'var(--ok)';
+  content.innerHTML = `
+  <div class="page-head">
+    <div><h2>Тариф и оплата</h2><p>Подписка, лимит разборов и счета на оплату</p></div>
+    <div class="spacer"></div>
+    <span class="pill" style="background:${b.expired ? '#fdeaea' : 'var(--brand-soft)'};color:${b.expired ? 'var(--bad)' : 'var(--brand)'};font-size:12.5px;padding:6px 12px">
+      ${b.expired ? 'Подписка не активна' : 'Тариф «' + esc(b.plan.name) + '» действует'}</span>
+  </div>
+
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="kpi accent"><div class="lbl">Текущий тариф</div><div class="val" style="font-size:22px">${esc(b.plan.name)}</div>
+      <div class="sub">${b.plan.price_month ? money(b.plan.price_month) + ' в месяц' : 'пробный доступ'}</div></div>
+    <div class="kpi"><div class="lbl">Разборов в этом месяце</div><div class="val">${b.used} / ${b.limit}</div>
+      <div class="sub">осталось ${b.left}</div>
+      <div style="margin-top:8px;height:6px;border-radius:4px;background:var(--line-2);overflow:hidden"><div style="height:100%;width:${usedPct}%;background:${barColor}"></div></div></div>
+    <div class="kpi ${b.days_left !== null && b.days_left <= 3 ? 'warn' : ''}"><div class="lbl">${b.plan.id === 'trial' ? 'Пробный доступ до' : 'Оплачено до'}</div>
+      <div class="val" style="font-size:20px">${(b.plan.id === 'trial' ? b.trial_until : b.plan_until || '').slice(0, 10) || '—'}</div>
+      <div class="sub">${b.days_left === null ? '' : 'осталось дней: ' + b.days_left}</div></div>
+    <div class="kpi"><div class="lbl">Оплата</div><div class="val" style="font-size:19px">по счёту</div>
+      <div class="sub">для юрлиц и ИП, активация в день оплаты</div></div>
+  </div>
+
+  <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:14px;margin-bottom:18px">
+    ${paid.map((p) => `
+      <div class="card ${p.popular ? '' : ''}" style="${p.popular ? 'border-color:#bcd2fb;box-shadow:0 16px 40px -30px rgba(37,99,235,.6)' : ''}">
+        <div class="card-body">
+          ${p.popular ? '<div class="tiny" style="color:var(--brand);font-weight:700;margin-bottom:4px">Выбирают чаще</div>' : ''}
+          <b style="font-size:16px">${esc(p.name)}</b>
+          <div style="font-size:23px;font-weight:800;letter-spacing:-.8px;margin:6px 0 2px">${money(p.price_month)}<span class="tiny muted" style="font-weight:600"> /мес</span></div>
+          <div class="tiny muted">или ${money(p.price_year)} в год — экономия 17%</div>
+          <div class="stack tiny" style="margin:12px 0;display:grid;gap:5px">
+            ${(p.features || []).map((f) => `<div style="display:flex;gap:6px"><span style="color:var(--ok);font-weight:800">✓</span><span>${esc(f)}</span></div>`).join('')}
+          </div>
+          <div style="display:flex;gap:6px;margin-top:10px">
+            <button class="btn primary sm" data-pay="${p.id}:month" style="flex:1">Оплатить</button>
+            <button class="btn sm" data-pay="${p.id}:year" title="Год со скидкой">Год</button>
+          </div>
+        </div>
+      </div>`).join('')}
+  </div>
+
+  <div class="split">
+    <div class="card">
+      <div class="card-head">Счета и платежи</div>
+      <div class="card-body" style="padding:0">
+        <div class="table-wrap"><table class="t">
+          <thead><tr><th>Дата</th><th>Тариф</th><th>Сумма</th><th>Статус</th><th></th></tr></thead>
+          <tbody>${(b.payments || []).length ? b.payments.map((p) => `<tr>
+            <td class="tiny nowrap">${esc((p.created_at || '').slice(0, 10))}</td>
+            <td class="tiny">${esc(p.plan)} · ${p.period === 'year' ? 'год' : 'месяц'}</td>
+            <td class="num">${money(p.amount)}</td>
+            <td><span class="pill" style="background:${p.status === 'paid' ? '#e7f7ee' : '#fff4e0'};color:${p.status === 'paid' ? 'var(--ok)' : '#b26a00'}">${p.status === 'paid' ? 'оплачен' : 'ожидает оплаты'}</span></td>
+            <td class="tiny muted">${p.status === 'paid' ? 'доступ активен' : 'счёт выставлен'}</td></tr>`).join('')
+            : '<tr><td colspan="5"><div class="empty">Счетов пока нет</div></td></tr>'}</tbody>
+        </table></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">Что входит в тариф «${esc(b.plan.name)}»</div>
+      <div class="card-body stack tiny" style="display:grid;gap:7px">
+        ${(b.features || []).map((f) => `<div style="display:flex;gap:7px"><span style="color:var(--ok);font-weight:800">✓</span><span>${esc(f)}</span></div>`).join('')}
+        <div style="margin-top:8px;padding-top:9px;border-top:1px solid var(--line-2)" class="muted">
+          Нужен больший объём, несколько юрлиц или внедрение под завод — оставьте заявку, соберём индивидуальный тариф.</div>
+      </div>
+    </div>
+  </div>`;
+
+  $$('[data-pay]').forEach((btn) => btn.addEventListener('click', async () => {
+    const [plan, period] = btn.dataset.pay.split(':');
+    btn.disabled = true; btn.innerHTML = '<span class="spinner"></span>';
+    try {
+      const r = await api('/billing/invoice', { method: 'POST', body: JSON.stringify({ plan, period }) });
+      showInvoice(r.invoice, r.payment);
+      await renderBilling();
+    } catch (e) { toast(e.message, 'err', 8000); btn.disabled = false; }
+  }));
+}
+
+function showInvoice(inv, payment) {
+  const html = `<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>Счёт №${inv.number}</title>
+  <style>body{font-family:-apple-system,"Segoe UI",Arial,sans-serif;color:#111;padding:34px;font-size:13px;max-width:760px;margin:0 auto}
+  h1{font-size:19px;margin:0 0 4px} table{width:100%;border-collapse:collapse;margin:16px 0}
+  th,td{border:1px solid #ccc;padding:8px 10px;text-align:left;font-size:12.5px} th{background:#f4f6fa}
+  .row{display:flex;justify-content:space-between;padding:3px 0} .muted{color:#666}
+  .total{font-size:15px;font-weight:700;margin-top:10px;padding-top:8px;border-top:2px solid #111}
+  .btn{display:inline-block;margin-top:16px;padding:10px 16px;background:#2563eb;color:#fff;border:0;border-radius:8px;cursor:pointer;font-size:13px}
+  @media print{.btn{display:none}}</style></head><body>
+  <h1>Счёт на оплату № ${inv.number} от ${inv.date}</h1>
+  <div class="muted">Доступ к сервису TenderPilot</div>
+  <div style="margin-top:14px">
+    <div class="row"><span>Поставщик</span><b>${inv.supplier}</b></div>
+    <div class="row"><span>ИНН поставщика</span><b>${inv.supplier_inn}</b></div>
+    <div class="row"><span>Счёт поставщика</span><b>${inv.supplier_account}</b></div>
+    <div class="row"><span>Банк</span><b>${inv.supplier_bank}</b></div>
+    <div class="row" style="margin-top:8px"><span>Плательщик</span><b>${inv.payer}</b></div>
+    <div class="row"><span>ИНН плательщика</span><b>${inv.payer_inn || '—'}</b></div>
+    <div class="row"><span>E-mail</span><b>${inv.payer_email}</b></div>
+  </div>
+  <table><thead><tr><th>Наименование</th><th>Кол-во</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>
+  ${inv.items.map((i) => `<tr><td>${i.name}</td><td>${i.qty}</td><td>${money(i.price)}</td><td>${money(i.sum)}</td></tr>`).join('')}
+  </tbody></table>
+  <div class="total">Итого к оплате: ${money(inv.total)} · ${inv.vat}</div>
+  <div class="muted" style="margin-top:10px">${inv.comment}</div>
+  <button class="btn" onclick="window.print()">Печать / сохранить PDF</button>
+  </body></html>`;
+  const w = window.open('', '_blank');
+  if (w) { w.document.write(html); w.document.close(); }
+  else toast('Счёт №' + inv.number + ' сформирован на сумму ' + money(inv.total), 'ok', 8000);
+}
+
 /* ================= ADMIN ================= */
 const ROLE_NAMES = { owner: 'Администратор', manager: 'Менеджер по тендерам', viewer: 'Наблюдатель' };
 const STATUS_NAMES = { pending: 'Ожидает подтверждения', active: 'Активен', blocked: 'Заблокирован' };
@@ -1339,7 +1468,7 @@ async function renderAdmin() {
     <div class="card-head">Пользователи <span class="muted tiny" style="font-weight:400">каждый со своей лентой и профилем завода</span></div>
     <div class="card-body" style="padding:0">
       <div class="table-wrap"><table class="t">
-        <thead><tr><th>Пользователь</th><th>Роль</th><th>Статус</th><th>Закупки</th><th>Последний вход</th><th style="text-align:right">Действия</th></tr></thead>
+        <thead><tr><th>Пользователь</th><th>Роль</th><th>Статус</th><th>Закупки</th><th>Тариф</th><th>Последний вход</th><th style="text-align:right">Действия</th></tr></thead>
         <tbody>${d.users.map((u) => `
           <tr>
             <td>
@@ -1356,6 +1485,8 @@ async function renderAdmin() {
             </select></td>
             <td>${badge(u.status)}</td>
             <td class="num">${u.tenders}<span class="tiny muted"> / ИИ ${u.analyzed}</span></td>
+            <td class="tiny">${esc((d.plans_by_user || {})[u.id]?.plan || 'trial')}
+              <button class="btn sm ghost" data-plan="${u.id}" title="Изменить тариф" style="padding:2px 6px;font-size:11px">✎</button></td>
             <td class="tiny muted">${u.last_login_at ? esc(u.last_login_at.replace('T', ' ').slice(0, 16)) : 'не входил'}</td>
             <td style="text-align:right;white-space:nowrap">
               ${u.status === 'pending' ? `<button class="btn sm primary" data-approve="${u.id}">Подтвердить</button> ` : ''}
@@ -1370,6 +1501,17 @@ async function renderAdmin() {
   </div>
 
   <div class="grid" style="grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:14px;align-items:start">
+    <div class="card">
+      <div class="card-head">Реквизиты для счетов</div>
+      <div class="card-body">
+        <div class="field"><label>Организация</label><input id="blCompany" value="${esc((d.billing.company_name || ''))}" placeholder="ООО «TenderPilot»"></div>
+        <div class="field" style="margin-top:8px"><label>ИНН</label><input id="blInn" value="${esc(d.billing.inn || '')}"></div>
+        <div class="field" style="margin-top:8px"><label>Расчётный счёт</label><input id="blAccount" value="${esc(d.billing.account || '')}"></div>
+        <div class="field" style="margin-top:8px"><label>Банк</label><input id="blBank" value="${esc(d.billing.bank || '')}" placeholder="ПАО Сбербанк, БИК 044525225"></div>
+        <button class="btn primary" data-save-billing style="margin-top:12px">Сохранить реквизиты</button>
+        <div class="tiny muted" style="margin-top:9px">Попадут в счёт, который клиент получит на оплату. Пока не заполнены — в счёте стоит пометка «не заполнено».</div>
+      </div>
+    </div>
     <div class="card">
       <div class="card-head">Регистрация</div>
       <div class="card-body">
@@ -1404,6 +1546,14 @@ function bindAdmin() {
   $$('[data-block]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.block, { status: 'blocked' }, 'Пользователь заблокирован')));
   $$('[data-unblock]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.unblock, { status: 'active' }, 'Доступ восстановлен')));
   $$('[data-role]').forEach((sel) => sel.addEventListener('change', () => patch(sel.dataset.role, { role: sel.value }, 'Роль изменена')));
+  $$('[data-plan]').forEach((b) => b.addEventListener('click', async () => {
+    const plan = prompt('Тариф: trial / solo / factory / department', 'factory');
+    if (!plan) return;
+    try {
+      await api('/admin/users/' + b.dataset.plan + '/plan', { method: 'PATCH', body: JSON.stringify({ plan, period: 'month' }) });
+      toast('Тариф изменён', 'ok'); await renderAdmin();
+    } catch (e) { toast(e.message, 'err'); }
+  }));
   $$('[data-reset]').forEach((b) => b.addEventListener('click', () => {
     const pwd = prompt('Новый пароль (минимум 6 символов):');
     if (pwd) patch(b.dataset.reset, { password: pwd }, 'Пароль изменён');
@@ -1413,6 +1563,15 @@ function bindAdmin() {
     try { await api('/admin/users/' + b.dataset.del, { method: 'DELETE' }); toast('Пользователь удалён', 'ok'); await renderAdmin(); }
     catch (e) { toast(e.message, 'err'); }
   }));
+  $('[data-save-billing]')?.addEventListener('click', async () => {
+    try {
+      await api('/admin/billing', { method: 'PUT', body: JSON.stringify({
+        company_name: $('#blCompany').value, inn: $('#blInn').value,
+        account: $('#blAccount').value, bank: $('#blBank').value,
+      }) });
+      toast('Реквизиты сохранены — они появятся в счетах', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  });
   $('[data-save-reg]')?.addEventListener('click', async () => {
     try {
       await api('/admin/registration', { method: 'PUT', body: JSON.stringify({
@@ -1446,6 +1605,7 @@ async function route() {
   else if (view === 'ai') await renderAiSettings();
   else if (view === 'analytics') { await loadTenders(); await renderAnalytics(); }
   else if (view === 'sources') await renderSources();
+  else if (view === 'billing') await renderBilling();
   else if (view === 'admin' && state.user?.role === 'owner') await renderAdmin();
   else await renderDashboard();
 }
@@ -1453,8 +1613,9 @@ async function route() {
 async function boot(force = false) {
   try {
     if (!state.user) { const r = await api('/me'); state.user = r.user; }
-    const [cat, comp, ais] = await Promise.all([api('/catalog'), api('/company'), api('/ai/settings')]);
+    const [cat, comp, ais, bill] = await Promise.all([api('/catalog'), api('/company'), api('/ai/settings'), api('/billing')]);
     state.catalog = cat; state.company = comp.company; state.ai = ais.settings; state.presets = ais.presets;
+    state.billing = bill;
     renderShell();
     await loadTenders();
     await route();
@@ -1465,6 +1626,7 @@ async function boot(force = false) {
 
 window.addEventListener('hashchange', () => { if (state.user) route(); });
 document.addEventListener('DOMContentLoaded', async () => {
+  const wantRegister = location.hash === '#register';
   try { const r = await api('/me'); state.user = r.user; await boot(true); }
-  catch (e) { renderLogin(); }
+  catch (e) { renderLogin(wantRegister ? 'register' : 'login'); }
 });

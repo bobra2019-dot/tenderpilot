@@ -278,6 +278,13 @@ def migrate(conn):
             conn.execute("UPDATE company SET data=? WHERE user_id=?", (cleaned, row["user_id"]))
     conn.commit()
 
+    # подписка и лимиты
+    try:
+        from . import billing
+        billing.add_billing_columns(conn)
+    except Exception:
+        pass
+
     # индекс дедупликации внутри ленты пользователя
     try:
         conn.execute("CREATE INDEX IF NOT EXISTS idx_tenders_user_ext ON tenders(user_id, ext_id, platform)")
@@ -325,10 +332,18 @@ def user_by_id(conn, uid):
 
 def create_user(conn, email, password, name, role="manager", status="active", company_name=""):
     email = str(email).strip().lower()
+    now = now_iso()
+    trial_until = None
+    try:
+        from datetime import datetime, timedelta, timezone
+        trial_until = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    except Exception:
+        trial_until = ""
     conn.execute(
-        "INSERT INTO users (email, pass_hash, name, role, status, company_name, created_at) "
-        "VALUES (?,?,?,?,?,?,?)",
-        (email, hash_pass(password), (name or email)[:120], role, status, (company_name or "")[:160], now_iso()),
+        "INSERT INTO users (email, pass_hash, name, role, status, company_name, created_at, "
+        "plan, trial_until, analyses_period) VALUES (?,?,?,?,?,?,?,?,?,?)",
+        (email, hash_pass(password), (name or email)[:120], role, status, (company_name or "")[:160],
+         now, "trial", trial_until or "", datetime.now(timezone.utc).strftime("%Y-%m")),
     )
     conn.commit()
     return user_by_email(conn, email)
