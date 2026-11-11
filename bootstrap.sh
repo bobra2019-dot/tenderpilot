@@ -21,5 +21,5 @@ print(f'   закупок: {n}, с ИИ-заключением: {a}')
 "
 
 echo "→ Запускаю сервер на http://0.0.0.0:$PORT"
-echo "   Вход: owner@zavod.ru / demo1234"
+echo "   Вход: owner@zavod.ru / Tender2026"
 exec python3 -m uvicorn app.main:app --host 0.0.0.0 --port "$PORT"

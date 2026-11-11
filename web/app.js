@@ -83,10 +83,10 @@ function renderLogin(mode = 'login', pendingMsg = '') {
         <h2 style="margin:0 0 6px;font-size:22px;letter-spacing:-.4px">Вход в систему</h2>
         <p class="muted tiny" style="margin:0 0 22px">Личный кабинет завода</p>
         <form id="loginForm">
-          <div class="field"><label>Email</label><input type="email" name="email" value="owner@zavod.ru" required></div>
-          <div class="field"><label>Пароль</label><input type="password" name="password" value="demo1234" required></div>
+          <div class="field"><label>Email</label><input type="email" name="email" placeholder="you@zavod.ru" autocomplete="username" required></div>
+          <div class="field"><label>Пароль</label><input type="password" name="password" placeholder="••••••••" autocomplete="current-password" required></div>
           <button class="btn primary block" type="submit" style="margin-top:6px">Войти</button>
-          <div class="hint" style="text-align:center;margin-top:14px">Демо-администратор: owner@zavod.ru / demo1234</div>
+          <div class="hint" style="text-align:center;margin-top:14px">Доступ выдаёт администратор системы</div>
         </form>`}
       </div>
     </div>
@@ -638,7 +638,7 @@ function renderTab(id) {
         ${(t.files || []).length ? t.files.map((f) => `<div style="display:flex;gap:10px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:10px">
           <div style="width:32px;height:32px;border-radius:8px;background:#eef2f7;display:grid;place-items:center;font-size:11px;font-weight:700;color:var(--ink-2)">${esc((f.name.split('.').pop() || '').toUpperCase())}</div>
           <div style="flex:1"><b style="font-size:12.8px">${esc(f.name)}</b><div class="tiny muted">${esc(f.kind || 'документ')} · ${Math.round((f.size || 0) / 1024)} КБ</div></div>
-          <span class="chip plain" style="cursor:pointer" onclick="toast('В демо файл не скачивается — в боевой версии отдаётся с площадки')">Скачать</span>
+          <a class="chip plain" href="${esc(t.source_url || '#')}" target="_blank" rel="noopener">Открыть на площадке</a>
         </div>`).join('') : '<div class="empty">Файлы не приложены</div>'}
       </div>
       <div class="divider"></div>

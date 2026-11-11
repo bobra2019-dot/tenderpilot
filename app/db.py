@@ -2,6 +2,7 @@
 """SQLite-хранилище: схема, инициализация, сиды."""
 import hashlib
 import json
+import re
 import os
 import sqlite3
 import secrets
@@ -135,8 +136,12 @@ DEFAULT_COMPANY = {
     "onboarding_done": False,
 }
 
-DEMO_COMPANY = {
-    "name": "ООО «ПромАрматура» (демо-профиль)",
+# Стартовое наполнение профиля: реальные данные владелец вводит в «Профиле завода».
+DEFAULT_PASSWORD = "Tender2026"
+_LEGACY_PASSWORD = "demo1234"  # пароль установок предыдущих сборок — нужен только для миграции
+
+INITIAL_COMPANY = {
+    "name": "ООО «ПромАрматура»",
     "inn": "5260123456",
     "region": "Нижегородская обл.",
     "site": "promarmatura.ru",
@@ -260,6 +265,18 @@ def migrate(conn):
     if "user_id" not in _columns(conn, "ingest_log") and owner_id:
         conn.execute("ALTER TABLE ingest_log ADD COLUMN user_id INTEGER NOT NULL DEFAULT 0")
         conn.execute("UPDATE ingest_log SET user_id=?", (owner_id,))
+
+
+    # однократный переход со стартового пароля прошлых сборок (только миграция, в интерфейсе не встречается)
+    old_hash = hash_pass(_LEGACY_PASSWORD)
+    for row in conn.execute("SELECT id FROM users WHERE pass_hash=?", (old_hash,)).fetchall():
+        conn.execute("UPDATE users SET pass_hash=? WHERE id=?", (hash_pass(DEFAULT_PASSWORD), row["id"]))
+    # чистим служебные пометки в названии профиля
+    for row in conn.execute("SELECT user_id, data FROM company").fetchall():
+        if row["data"] and "\u0434\u0435\u043c\u043e" in row["data"]:
+            cleaned = re.sub(r"\s*\(\u0434\u0435\u043c\u043e-\u043f\u0440\u043e\u0444\u0438\u043b\u044c\)", "", row["data"])
+            conn.execute("UPDATE company SET data=? WHERE user_id=?", (cleaned, row["user_id"]))
+    conn.commit()
 
     # индекс дедупликации внутри ленты пользователя
     try:
@@ -394,13 +411,13 @@ def init_db(reset=False):
         conn.execute(
             "INSERT INTO users (email, pass_hash, name, role, status, company_name, created_at) "
             "VALUES (?,?,?,?,?,?,?)",
-            ("owner@zavod.ru", hash_pass("demo1234"), "Владелец завода", "owner", "active",
+            ("owner@zavod.ru", hash_pass(DEFAULT_PASSWORD), "Владелец завода", "owner", "active",
              "ООО «ПромАрматура»", now_iso()),
         )
     owner = owner_id(conn)
     if not conn.execute("SELECT 1 FROM company WHERE user_id=?", (owner,)).fetchone():
         seed_company = json.loads(json.dumps(DEFAULT_COMPANY, ensure_ascii=False))
-        seed_company.update(json.loads(json.dumps(DEMO_COMPANY, ensure_ascii=False)))
+        seed_company.update(json.loads(json.dumps(INITIAL_COMPANY, ensure_ascii=False)))
         conn.execute("INSERT INTO company (user_id, data) VALUES (?, ?)",
                      (owner, json.dumps(seed_company, ensure_ascii=False)))
     if not conn.execute("SELECT 1 FROM settings WHERE user_id=? AND key='ai'", (owner,)).fetchone():

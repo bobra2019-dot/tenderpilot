@@ -107,7 +107,7 @@ def register(data: RegisterIn):
                               company_name=data.company_name or "")
         # каждому пользователю — свой профиль завода и настройки
         seed_company = json.loads(json.dumps(db.DEFAULT_COMPANY, ensure_ascii=False))
-        seed_company.update(json.loads(json.dumps(db.DEMO_COMPANY, ensure_ascii=False)))
+        seed_company.update(json.loads(json.dumps(db.INITIAL_COMPANY, ensure_ascii=False)))
         if data.company_name:
             seed_company["name"] = data.company_name
         conn.execute("INSERT OR REPLACE INTO company (user_id, data) VALUES (?,?)",
@@ -788,7 +788,7 @@ def admin_create_user(data: AdminUserIn, user=Depends(admin_user)):
         u = db.create_user(conn, data.email, data.password, data.name or data.email,
                            role=data.role, status=data.status, company_name=data.company_name)
         seed_company = json.loads(json.dumps(db.DEFAULT_COMPANY, ensure_ascii=False))
-        seed_company.update(json.loads(json.dumps(db.DEMO_COMPANY, ensure_ascii=False)))
+        seed_company.update(json.loads(json.dumps(db.INITIAL_COMPANY, ensure_ascii=False)))
         if data.company_name:
             seed_company["name"] = data.company_name
         conn.execute("INSERT OR REPLACE INTO company (user_id, data) VALUES (?,?)",
@@ -1182,7 +1182,7 @@ def download_page():
 
 <div class="card">
   <h1>Скачать TenderPilot</h1>
-  <p>Проект целиком: бэкенд, интерфейс, демо-база и инструкция.</p>
+  <p>Проект целиком: сервер, интерфейс, база и инструкция.</p>
   <div id="frameWarn"></div>
   <a class="btn" href="/download/TenderPilot.zip" download>⬇ Скачать архив TenderPilot.zip</a>
   {f'<a class="btn alt" href="/single">Способ без скачивания →</a>' if has_single else ''}
@@ -1216,7 +1216,7 @@ def download_page():
   <h2>Что делать с архивом</h2>
   <pre>cd TenderPilot
 ./bootstrap.sh</pre>
-  <p>Откройте <code>http://localhost:8000</code>, вход: <code>owner@zavod.ru</code> / <code>demo1234</code>.</p>
+  <p>Откройте <code>http://localhost:8000</code>, вход: <code>owner@zavod.ru</code> / <code>Tender2026</code>.</p>
   <p><small>Windows без bash: <code>pip install -r requirements.txt</code>, затем
   <code>python -m uvicorn app.main:app --port 8000</code></small></p>
 </div>
@@ -1251,7 +1251,7 @@ def single_page():
     <li>Откройте <b>Блокнот</b> (или любой текстовый редактор) и вставьте (Ctrl+V).</li>
     <li>Сохраните как <code>tenderpilot.py</code> — <b>тип файла «Все файлы»</b>, кодировка <b>UTF-8</b>.</li>
     <li>В терминале в папке с файлом: <code>python tenderpilot.py</code></li>
-    <li>Откройте <code>http://localhost:8000</code>, вход <code>owner@zavod.ru</code> / <code>demo1234</code>.</li>
+    <li>Откройте <code>http://localhost:8000</code>, вход <code>owner@zavod.ru</code> / <code>Tender2026</code>.</li>
   </ol>
   <button class="btn" id="sel">Выделить весь код</button>
   <a class="btn alt" href="/download/tenderpilot.py" download>⬇ Скачать tenderpilot.py</a>

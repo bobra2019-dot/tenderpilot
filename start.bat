@@ -53,9 +53,9 @@ echo.
 echo Libraries OK.
 echo.
 
-REM ---- 3. Demo database ----
+REM ---- 3. Database ----
 if not exist "data\tenderpilot.db" (
-    echo Creating demo database...
+    echo Creating database...
     %PY% -c "from app import db; db.init_db()"
 )
 
@@ -63,7 +63,7 @@ REM ---- 4. Run ----
 echo ============================================================
 echo    Server: http://localhost:8000
 echo    Login:  owner@zavod.ru
-echo    Pass:   demo1234
+echo    Pass:   Tender2026
 echo.
 echo    Browser opens automatically.
 echo    Keep this window open. Close it to stop the server.

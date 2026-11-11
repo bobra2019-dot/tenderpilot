@@ -8,7 +8,7 @@ RUN pip install --only-binary=:all: -r requirements.txt
 
 COPY app ./app
 COPY web ./web
-COPY build_static.py build_single.py README.md ./
+COPY README.md ./
 
 RUN mkdir -p data inbox && python -c "from app import db; db.init_db()"
 
