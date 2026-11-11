@@ -58,6 +58,12 @@
   .nav-links a:hover{color:var(--ink)}
   .nav-cta{margin-left:auto;display:flex;gap:10px;align-items:center}
   @media(max-width:900px){.nav-links{display:none}}
+  @media(max-width:640px){
+    .nav{gap:10px}
+    .nav-cta .btn.ghost{display:none}          /* «Войти» уже есть в нижней панели */
+    .nav-cta .btn.primary{padding:9px 12px;font-size:13px}
+    .logo{font-size:15px}
+  }
 
   /* hero */
   .hero{padding:60px 0 40px;background:
@@ -182,6 +188,26 @@
   .setup b{font-size:15px}
   .setup .d{font-size:13.5px;color:var(--ink2);margin-top:4px;line-height:1.5}
 
+  /* экспресс-проверка */
+  .expr{display:grid;grid-template-columns:1fr .9fr;gap:20px;background:#fff;border:1px solid var(--line);
+        border-radius:16px;padding:24px;box-shadow:var(--sh)}
+  @media(max-width:900px){.expr{grid-template-columns:1fr;padding:18px}}
+  .expr textarea{width:100%;padding:12px;border:1px solid var(--line);border-radius:11px;font-size:13.5px;
+        font-family:inherit;resize:vertical;line-height:1.5;background:#fff}
+  .expr input{width:100%;padding:11px 12px;border:1px solid var(--line);border-radius:10px;font-size:14px;font-family:inherit}
+  .expr-out{background:var(--bg);border:1px solid var(--line);border-radius:13px;padding:18px;min-height:220px}
+  .expr-empty{text-align:center;color:var(--ink3);font-size:13.5px;padding-top:56px}
+  .expr-empty b{color:var(--ink2);font-size:14.5px}
+  .exp-verdict{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+  .exp-verdict .dot{width:12px;height:12px;border-radius:50%;flex:0 0 auto}
+  .exp-verdict b{font-size:15px}
+  .exp-item{border-bottom:1px dashed var(--line);padding:9px 0;font-size:13px;line-height:1.5}
+  .exp-item:last-child{border:0}
+  .exp-item b{display:block;margin-bottom:2px;font-size:13.2px}
+  .exp-item span{color:var(--ink2)}
+  .exp-lock{margin-top:12px;padding:12px 14px;border-radius:11px;background:#fff;border:1px dashed #c9d5e8;
+        font-size:12.8px;color:var(--ink2);line-height:1.5}
+
   /* calculator */
   .calc{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:center;background:var(--bg);
         border:1px solid var(--line);border-radius:18px;padding:28px}
@@ -236,10 +262,10 @@
         display:grid;place-items:center;margin:0 auto 14px;font-weight:800}
 
   /* мобильная кнопка */
-  .mobile-bar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(255,255,255,.96);
+  .mobile-bar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:40;box-shadow:0 -6px 18px -12px rgba(15,23,41,.4);background:rgba(255,255,255,.96);
         border-top:1px solid var(--line);padding:10px 14px;gap:10px;backdrop-filter:blur(8px)}
   .mobile-bar .btn{flex:1}
-  @media(max-width:640px){.mobile-bar{display:flex}body{padding-bottom:66px}}
+  @media(max-width:640px){.mobile-bar{display:flex}body{padding-bottom:86px}}
   @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style>
 </head>
@@ -250,6 +276,7 @@
     <a class="logo" href="/"><span class="mark">TP</span> TenderPilot</a>
     <nav class="nav-links">
       <a href="#how">Как работает</a>
+      <a href="#express">Проверить ТЗ</a>
       <a href="#sample">Пример разбора</a>
       <a href="#pricing">Тарифы</a>
       <a href="#calc">Окупаемость</a>
@@ -270,10 +297,11 @@
       <h1>Тендерный отдел завода,<br>который не устаёт</h1>
       <p class="lead">TenderPilot собирает закупки с ЕИС и площадок, читает техническое задание,
         сверяет требования с вашим производством и сертификатами, считает маржу и говорит прямо:
-        <b>идём или не идём</b> — с обоснованием по пунктам ТЗ.</p>
+        <b>идём или не идём</b> — с обоснованием по пунктам ТЗ. А перед подачей проверяет допуск:
+        не даёт заявке отклониться по формальностям и не даёт уйти в минус на антидемпинге.</p>
       <div class="hero-actions">
         <a class="btn primary" href="/app#register">Начать бесплатно — 7 дней</a>
-        <a class="btn ghost" href="#sample">Посмотреть пример разбора</a>
+        <a class="btn ghost" href="#express">Проверить своё ТЗ бесплатно</a>
       </div>
       <div class="micro">Без карты · <b>10 разборов</b> закупок бесплатно · отмена в один клик</div>
       <div class="trust">
@@ -316,6 +344,46 @@
   </div>
 </section>
 
+<section id="express" style="background:var(--bg)">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Бесплатно, без регистрации</div>
+      <h2>Проверьте своё ТЗ за 10 секунд</h2>
+      <p class="sub">Вставьте раздел требований из любого ТЗ — покажем, из-за чего заявку отклоняют:
+        декларация, страна происхождения, нацрежим, диапазонные характеристики, сроки, обеспечение.</p>
+    </div>
+    <div class="expr">
+      <div>
+        <label for="expText" style="display:block;font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:7px">
+          Текст ТЗ или требований из документации</label>
+        <textarea id="expText" rows="7"
+          placeholder="Например: «Поставка в течение 30 календарных дней. Обеспечение заявки 1%, обеспечение исполнения 10%. Требуется сертификат ТР ТС 032/2013. Установлен запрет на допуск иностранных товаров, требуется реестровая запись. Диаметр от 100 до 300 мм. Закупка для СМП. Оплата по факту поставки»"></textarea>
+        <div style="display:grid;grid-template-columns:1fr 1fr auto;gap:10px;margin-top:10px;align-items:end">
+          <div>
+            <label for="expSum" style="display:block;font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:6px">НМЦК, ₽</label>
+            <input type="number" id="expSum" placeholder="4 850 000">
+          </div>
+          <div>
+            <label for="expDisc" style="display:block;font-size:12.5px;font-weight:600;color:var(--ink2);margin-bottom:6px">Планируемое снижение, %</label>
+            <input type="number" id="expDisc" value="0" min="0" max="70">
+          </div>
+          <button class="btn primary" id="expRun" type="button">Проверить</button>
+        </div>
+        <div class="micro" style="margin-top:10px">Текст отправляется на наш сервер только для проверки и не публикуется.
+          Полный чек-лист с рекомендациями доступен в кабинете.</div>
+      </div>
+      <div class="expr-out" id="expOut">
+        <div class="expr-empty">
+          <div style="font-size:26px;margin-bottom:8px">✓</div>
+          <b>Здесь появится результат</b>
+          <div class="micro" style="margin-top:6px">Сколько пунктов блокируют заявку, что проверить
+            и сколько денег потребует антидемпинг при снижении цены.</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
 <section id="how" style="background:var(--bg)">
   <div class="wrap">
     <div class="sec-head">
@@ -339,6 +407,12 @@
       <div class="card"><div class="ico">✈</div><h3>Присылает в Telegram</h3>
         <p>Только подходящие закупки по вашему профилю, с вердиктом и суммой.
            Не надо сидеть в портале и обновлять выдачу.</p></div>
+      <div class="card" style="border-color:#bcd2fb"><div class="ico">✓</div><h3>Проверяет допуск</h3>
+        <p>Чек-лист перед подачей: декларация ст. 31, страна происхождения и нацрежим, реестровая запись РРПП,
+           диапазонные характеристики, независимая гарантия, доптребования. Каждый пункт — с нормой и тем, что сделать.</p></div>
+      <div class="card"><div class="ico">⛔</div><h3>Считает антидемпинг</h3>
+        <p>Снизили цену на 25%+ — покажем, какое обеспечение потребуют, сколько денег найти и сколько
+           это съест из маржи. До торгов, а не после.</p></div>
       <div class="card"><div class="ico">▦</div><h3>Ведёт отдел</h3>
         <p>Роли и доступы, у каждого своя лента, воронка от «новый» до «выигран»,
            журнал действий и аналитика по площадкам.</p></div>
@@ -531,6 +605,13 @@
       <p>Подключается языковая модель по вашему ключу API или по нашему — по выбору. Текст ТЗ
          отправляется только в выбранную вами модель; другим клиентам данные не передаются.
          Для закрытых закупок возможен режим без внешней модели.</p></details>
+    <details><summary>Что такое «проверка допуска»?</summary>
+      <p>Это чек-лист перед подачей заявки, собранный по практике ФАС: декларация соответствия ст. 31
+         (включая п. 7 и 7.1), страна происхождения и меры нацрежима по ПП № 1875, реестровая запись РРПП,
+         диапазонные характеристики вместо конкретных, независимая гарантия и ИКЗ, доптребования по ПП № 2571,
+         сроки и кассовый разрыв. По каждому пункту видно: норма, где смотреть, что сделать.
+         Плюс расчёт антидемпинговых последствий по ст. 37: какое обеспечение потребуют при снижении
+         на 25% и более. Проверить своё ТЗ можно бесплатно прямо на этой странице.</p></details>
     <details><summary>ИИ ошибается — кто отвечает за решение?</summary>
       <p>Решение всегда за вами. Система показывает, на каком пункте ТЗ основан вывод, какие требования
          не закрыты и какие цифры по марже. Это инструмент подготовки решения, а не замена специалисту.</p></details>
@@ -699,6 +780,54 @@ function calc() {
 ['salary', 'people', 'share', 'planSel'].forEach((id) => {
   const el = document.getElementById(id);
   if (el) { el.addEventListener('input', calc); el.addEventListener('change', calc); }
+});
+
+/* ---- экспресс-проверка ТЗ ---- */
+document.getElementById('expRun').addEventListener('click', async () => {
+  const out = document.getElementById('expOut');
+  const btn = document.getElementById('expRun');
+  const text = document.getElementById('expText').value.trim();
+  if (text.length < 120) {
+    out.innerHTML = '<div class="expr-empty"><b>Слишком короткий текст</b><div class="micro" style="margin-top:6px">Вставьте абзац из ТЗ — хотя бы 120 знаков.</div></div>';
+    return;
+  }
+  btn.disabled = true; btn.textContent = 'Проверяем…';
+  out.innerHTML = '<div class="expr-empty"><div style="font-size:13px">Читаем документ…</div></div>';
+  try {
+    const r = await fetch('/api/dopusk/express', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text, sum: Number(document.getElementById('expSum').value) || 0,
+                             discount_pct: Number(document.getElementById('expDisc').value) || 0 }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.detail || 'Не удалось проверить');
+    const color = d.verdict === 'blocked' ? '#dc2626' : d.verdict === 'attention' ? '#d97706' : '#0f9d58';
+    const label = d.verdict === 'blocked' ? 'Заявку отклонят' : d.verdict === 'attention' ? `Найдено ${d.counts.warn} рисков отклонения` : 'Критичных препятствий нет';
+    const anti = d.antidumping && d.antidumping.applies ? `
+      <div class="exp-item" style="border-color:#f6d7a8">
+        <b style="color:#b26a00">Антидемпинг при снижении ${d.antidumping.discount_pct}%</b>
+        <span>Потребуется обеспечение ${new Intl.NumberFormat('ru-RU').format(Math.round(d.antidumping.security_x15 || 0))} ₽ —
+        дополнительно найти ${new Intl.NumberFormat('ru-RU').format(Math.round(d.antidumping.extra_cost || 0))} ₽.</span>
+      </div>` : '';
+    out.innerHTML = `
+      <div class="exp-verdict"><span class="dot" style="background:${color}"></span>
+        <b style="color:${color}">${label}</b>
+        <span class="micro" style="margin-left:auto">балл допуска ${d.score}/100</span></div>
+      <div class="micro" style="margin-bottom:10px">${d.counts.fail} блокирует · ${d.counts.warn} проверить · ${d.counts.ok} ок</div>
+      ${anti}
+      ${(d.top || []).map((i) => `
+        <div class="exp-item"><b>${i.title}</b><span>${i.what}</span>
+        ${i.norm ? `<div class="micro" style="margin-top:3px">${i.norm}</div>` : ''}</div>`).join('')}
+      <div class="exp-lock">
+        <b>Ещё ${d.hidden} пунктов</b> в полном чек-листе — с нормой, местом проверки и тем,
+        что сделать до подачи. Он доступен в кабинете: <a href="/app#register" style="color:var(--brand);font-weight:600">7 дней и 10 разборов бесплатно</a>
+        · <a href="#cta" data-ask="Полный чек-лист по ТЗ" style="color:var(--brand);font-weight:600">прислать отчёт на почту</a>
+      </div>`;
+  } catch (ex) {
+    out.innerHTML = `<div class="expr-empty"><b>Проверка не прошла</b><div class="micro" style="margin-top:6px">${ex.message}</div></div>`;
+  } finally {
+    btn.disabled = false; btn.textContent = 'Проверить';
+  }
 });
 
 /* ---- форма заявки ---- */

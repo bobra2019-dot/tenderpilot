@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, billing, db, ingest, leads as leads_mod, notify, scheduler, scoring, sources as src_mod
+from . import ai, billing, db, dopusk as dopusk_mod, ingest, leads as leads_mod, notify, scheduler, scoring, sources as src_mod
 from .catalog import CATEGORIES, CATEGORY_BY_ID, PLATFORM_BY_ID, PLATFORMS, REGIONS, STAGES
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -1072,6 +1072,57 @@ def admin_set_plan(uid: int, data: PlanIn, user=Depends(admin_user)):
         conn.close()
 
 
+# ---------------- проверка допуска (чек-лист перед подачей) ----------------
+class DopuskIn(BaseModel):
+    tender_id: Optional[int] = None
+    text: Optional[str] = None
+    discount_pct: Optional[float] = None
+    sum: Optional[float] = None
+    delivery_days: Optional[int] = None
+
+
+@app.post("/api/dopusk")
+def dopusk_check(data: DopuskIn, user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        company = db.get_company(conn, user["id"])
+        tender = {}
+        if data.tender_id:
+            row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?",
+                               (data.tender_id, user["id"])).fetchone()
+            if not row:
+                raise HTTPException(404, "Закупка не найдена")
+            tender = dict(row)
+    finally:
+        conn.close()
+    if data.text:
+        tender["tz_text"] = data.text
+    if data.sum:
+        tender["sum"] = data.sum
+    if data.delivery_days:
+        tender["delivery_days"] = data.delivery_days
+    if not tender:
+        raise HTTPException(400, "Нужен текст ТЗ или закупка из ленты")
+    result = dopusk_mod.check(tender, company, data.discount_pct, text=data.text or None)
+    result["title"] = tender.get("title") or "Проверка по тексту ТЗ"
+    return result
+
+
+@app.get("/api/tenders/{tid}/dopusk")
+def dopusk_for_tender(tid: int, discount: Optional[float] = None, user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
+        if not row:
+            raise HTTPException(404, "Закупка не найдена")
+        company = db.get_company(conn, user["id"])
+    finally:
+        conn.close()
+    result = dopusk_mod.check(dict(row), company, discount)
+    result["title"] = row["title"]
+    return result
+
+
 # ---------------- заявки с публичной страницы ----------------
 class LeadIn(BaseModel):
     name: str = ""
@@ -1128,6 +1179,48 @@ def lead_create(data: LeadIn, request: Request):
     finally:
         conn.close()
     return {"ok": True, "id": lid, "message": "Заявка принята. Ответим в рабочее время."}
+
+
+class ExpressIn(BaseModel):
+    text: str = ""
+    sum: Optional[float] = None
+    discount_pct: Optional[float] = 0
+
+
+_DOP_HITS = {}
+
+
+@app.post("/api/dopusk/express")
+def dopusk_express(data: ExpressIn, request: Request):
+    """Публичная экспресс-проверка: гость вставляет ТЗ и видит формальные риски.
+
+    Отдаём сокращённый результат: счётчики и главные пункты без персональных
+    рекомендаций — чтобы ценность была видна, но полный разбор оставался в кабинете.
+    """
+    text = (data.text or "").strip()
+    if len(text) < 120:
+        raise HTTPException(400, "Вставьте хотя бы абзац из ТЗ — 120 знаков и больше")
+    ip = (request.client.host if request.client else "") or ""
+    now = datetime.now(timezone.utc).timestamp()
+    hits = [t for t in _DOP_HITS.get(ip, []) if now - t < 3600]
+    if len(hits) >= 10:
+        raise HTTPException(429, "Проверок с одного адреса слишком много. Зарегистрируйтесь — там лимит выше.")
+    hits.append(now)
+    _DOP_HITS[ip] = hits
+    if len(_DOP_HITS) > 5000:
+        _DOP_HITS.clear()
+    tender = {"tz_text": text[:20000], "sum": data.sum or 0,
+              "delivery_days": None, "title": "Проверка по вашему ТЗ"}
+    result = dopusk_mod.check(tender, {}, data.discount_pct, text=text[:20000])
+    top = [i for i in result["items"] if i["status"] in ("fail", "warn")][:3]
+    return {
+        "verdict": result["verdict"], "score": result["score"], "counts": result["counts"],
+        "summary": result["summary"],
+        "top": [{k: i[k] for k in ("title", "what", "why", "norm", "fix", "status")} for i in top],
+        "antidumping": result.get("antidumping"),
+        "hidden": max(0, result["counts"]["total"] - len(top)),
+        "disclaimer": result["disclaimer"],
+    }
 
 
 @app.get("/api/admin/leads")

@@ -139,6 +139,7 @@ const NAV = [
   { sep: 'Настройка' },
   { id: 'profile', name: 'Профиль завода', ico: '⚙' },
   { id: 'ai', name: 'Настройки ИИ', ico: '✳' },
+  { id: 'dopusk', name: 'Проверка допуска', ico: '✓' },
   { id: 'billing', name: 'Тариф и оплата', ico: '₽' },
   { id: 'admin', name: 'Администрирование', ico: '▦', adminOnly: true },
 ];
@@ -432,6 +433,7 @@ async function renderTender(id) {
     <button class="btn ghost sm" onclick="history.back()">←</button>
     <span class="muted tiny">Лента / ${esc(t.platform_short)} / ${esc(t.ext_id || '')}</span>
     <div style="flex:1"></div>
+    <a class="btn sm" href="#/dopusk/${t.id}" style="border:1px solid var(--line)">✓ Проверить допуск</a>
     <button class="btn sm" data-act="print">🖨 Заключение</button>
     <select class="btn sm" data-stage style="padding:8px 10px">${(state.catalog?.stages || []).map((s) => `<option value="${s.id}" ${t.stage === s.id ? 'selected' : ''}>Этап: ${esc(s.name)}</option>`).join('')}</select>
   </div>
@@ -519,6 +521,7 @@ function renderTab(id) {
     body.innerHTML = `
       <div class="no-print" style="display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap">
         <button class="btn primary sm" data-analyze>${a ? '✳ Обновить заключение ИИ' : '✳ Запустить анализ ИИ'}</button>
+        <a class="btn sm" href="#/dopusk/${t.id}">✓ Проверить допуск</a>
         <input id="aiQuestion" placeholder="Свой вопрос к ИИ по этой закупке…" style="flex:1;min-width:200px;padding:7px 11px;border:1px solid var(--line);border-radius:9px;outline:none">
         <button class="btn sm" data-ask>Спросить</button>
       </div>
@@ -546,7 +549,10 @@ function renderTab(id) {
       <b style="font-size:13px">Проверка требований ТЗ</b>
       <div style="margin-top:6px">${(a.requirements || []).map((r) => `
         <div class="req"><div class="req-ico ${r.status}">${r.status === 'met' ? '✓' : r.status === 'partial' ? '≈' : r.status === 'missing' ? '✕' : '?'}</div>
-        <div><b>${esc(r.text)}</b><span>${esc(r.comment)}</span></div></div>`).join('')}</div>
+        <div><b>${esc(r.text)}</b><span>${esc(r.comment)}</span>
+          ${r.quote ? `<span class="tiny" style="display:block;margin-top:3px;padding:5px 8px;background:#f7f9fc;border-radius:6px;color:var(--ink-3);font-style:italic">«${esc(r.quote)}»</span>` : ''}</div></div>`).join('')}</div>
+      ${(a.formal_check || []).length ? `<div class="divider"></div><b style="font-size:13px">Формальная проверка перед подачей</b>
+        <div class="stack" style="margin-top:8px">${a.formal_check.map((f) => `<div class="risk medium"><span class="risk-lvl">док</span><span><b>${esc(f.title)}</b> — ${esc(f.detail)}</span></div>`).join('')}</div>` : ''}
       ${(a.risks || []).length ? `<div class="divider"></div><b style="font-size:13px">Риски</b><div style="margin-top:8px">${a.risks.map((r) => `<div class="risk ${r.level}"><span class="risk-lvl">${r.level === 'high' ? 'критично' : r.level === 'medium' ? 'средне' : 'низко'}</span><span>${esc(r.text)}</span></div>`).join('')}</div>` : ''}
       ${(a.red_flags || []).length ? `<div class="divider"></div><b style="font-size:13px">Признаки ограничения конкуренции</b><div style="margin-top:8px" class="stack">${a.red_flags.map((x) => `<div class="risk high"><span class="risk-lvl">flag</span><span>${esc(x)}</span></div>`).join('')}</div>` : ''}
       <div class="divider"></div>
@@ -1317,6 +1323,127 @@ function bindSources() {
 
 
 /* ================= BILLING (тариф и оплата) ================= */
+/* ================= ПРОВЕРКА ДОПУСКА ================= */
+const DOPUSK_STYLE = {
+  fail: { bg: '#fdeaea', color: '#b91c1c', ico: '✕', label: 'блокирует' },
+  warn: { bg: '#fff4e0', color: '#b26a00', ico: '!', label: 'проверить' },
+  info: { bg: '#eef4ff', color: '#1e40af', ico: 'i', label: 'к сведению' },
+  ok:   { bg: '#e7f7ee', color: '#0f9d58', ico: '✓', label: 'ок' },
+};
+
+function dopuskItem(it) {
+  const st = DOPUSK_STYLE[it.status] || DOPUSK_STYLE.info;
+  return `<div style="border:1px solid var(--line);border-radius:11px;padding:13px 15px;margin-bottom:9px;background:#fff">
+    <div style="display:flex;gap:10px;align-items:flex-start">
+      <span style="flex:0 0 auto;width:22px;height:22px;border-radius:50%;background:${st.bg};color:${st.color};
+        display:grid;place-items:center;font-size:12px;font-weight:800">${st.ico}</span>
+      <div style="min-width:0;flex:1">
+        <div style="display:flex;gap:8px;align-items:baseline;flex-wrap:wrap">
+          <b style="font-size:13.5px">${esc(it.title)}</b>
+          <span class="tiny" style="background:${st.bg};color:${st.color};padding:1px 7px;border-radius:6px;font-weight:700">${st.label}</span>
+        </div>
+        <div style="font-size:13px;color:var(--ink2);margin-top:5px;line-height:1.5">${esc(it.what)}</div>
+        ${it.why ? `<div class="tiny" style="color:var(--ink3);margin-top:5px;line-height:1.5"><b>Почему важно:</b> ${esc(it.why)}</div>` : ''}
+        <div class="tiny" style="display:flex;gap:14px;flex-wrap:wrap;margin-top:7px;color:var(--ink3)">
+          ${it.norm ? `<span><b>Норма:</b> ${esc(it.norm)}</span>` : ''}
+          ${it.where ? `<span><b>Где смотреть:</b> ${esc(it.where)}</span>` : ''}
+        </div>
+        ${it.fix ? `<div class="tiny" style="margin-top:6px;color:var(--brand);line-height:1.5"><b>Что сделать:</b> ${esc(it.fix)}</div>` : ''}
+        ${it.found ? `<div class="tiny" style="margin-top:6px;padding:7px 9px;background:#f7f9fc;border-radius:7px;color:var(--ink2);font-style:italic">«${esc(it.found).slice(0, 240)}»</div>` : ''}
+      </div>
+    </div>
+  </div>`;
+}
+
+function dopuskResult(d) {
+  const c = d.counts || {};
+  const color = d.verdict === 'blocked' ? 'var(--bad)' : d.verdict === 'attention' ? '#b26a00' : 'var(--ok)';
+  const label = d.verdict === 'blocked' ? 'Есть блокирующие пункты' : d.verdict === 'attention' ? 'Нужна проверка' : 'Препятствий нет';
+  const anti = d.antidumping ? `
+    <div class="card" style="margin-bottom:14px;border-color:${d.antidumping.applies ? '#f6d7a8' : 'var(--line)'}">
+      <div class="card-head">Антидемпинг при снижении ${d.antidumping.discount_pct}%</div>
+      <div class="card-body">
+        ${d.antidumping.applies ? `
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:10px">
+          <div><div class="tiny muted">Обеспечение по документации</div><div style="font-size:18px;font-weight:700">${money(d.antidumping.security_now || 0)}</div></div>
+          <div><div class="tiny muted">Потребуется при снижении</div><div style="font-size:18px;font-weight:700;color:#b26a00">${money(d.antidumping.security_x15 || 0)}</div></div>
+          <div><div class="tiny muted">Дополнительно найти</div><div style="font-size:18px;font-weight:700;color:var(--bad)">${money(d.antidumping.extra_cost || 0)}</div></div>
+        </div>` : ''}
+        <ul style="margin:0;padding-left:18px;font-size:13px;color:var(--ink2);line-height:1.6">
+          ${(d.antidumping.notes || []).map((n) => `<li>${esc(n)}</li>`).join('')}
+        </ul>
+      </div>
+    </div>` : '';
+  return `
+    <div class="grid kpis" style="margin-bottom:14px;grid-template-columns:repeat(4,1fr)">
+      <div class="kpi" style="border-left:3px solid ${color}">
+        <div class="lbl">Итог проверки</div>
+        <div class="val" style="color:${color};font-size:20px">${label}</div>
+        <div class="sub">балл допуска ${d.score} из 100</div>
+      </div>
+      <div class="kpi"><div class="lbl">Блокирует</div><div class="val" style="color:var(--bad)">${c.fail || 0}</div><div class="sub">отклонят или не успеете</div></div>
+      <div class="kpi"><div class="lbl">Проверить</div><div class="val" style="color:#b26a00">${c.warn || 0}</div><div class="sub">формальности и документы</div></div>
+      <div class="kpi"><div class="lbl">Пройдено</div><div class="val" style="color:var(--ok)">${(c.ok || 0)}</div><div class="sub">из ${c.total || 0} пунктов</div></div>
+    </div>
+    ${anti}
+    ${(d.items || []).map(dopuskItem).join('')}
+    <div class="tiny muted" style="margin-top:12px">${esc(d.disclaimer || '')}</div>`;
+}
+
+async function renderDopusk(arg) {
+  const content = $('#content');
+  const tid = arg ? parseInt(arg, 10) : null;
+  content.innerHTML = `<div class="page-head"><div><h2>Проверка допуска</h2>
+    <p>Чек-лист перед подачей: почему заявку отклоняют и что проверить</p></div></div>
+    <div class="card"><div class="card-body"><div class="skel" style="height:180px"></div></div></div>`;
+
+  let tender = null;
+  if (tid) {
+    try { tender = await api('/tenders/' + tid); } catch (e) { toast(e.message, 'err'); }
+  }
+  content.innerHTML = `
+  <div class="page-head">
+    <div><h2>Проверка допуска</h2>
+      <p>${tender ? 'Закупка: ' + esc(tender.tender?.title || '') : 'Вставьте текст ТЗ — проверка по формальным требованиям и рискам'}</p></div>
+    <div class="spacer"></div>
+    ${tid ? `<a class="btn sm ghost" href="#tender/${tid}">← К закупке</a>` : ''}
+  </div>
+  <div class="grid" style="grid-template-columns:minmax(0,1fr);gap:14px;margin-bottom:16px">
+    <div class="card"><div class="card-body">
+      <div class="field"><label>Текст ТЗ или требований</label>
+        <textarea id="dpText" style="min-height:120px;font-size:13px" placeholder="Вставьте раздел требований из ТЗ: сроки поставки, обеспечение, сертификаты, нацрежим, оплата">${esc(tender?.tender?.tz_text || tender?.tender?.requirements || '')}</textarea></div>
+      <div class="grid" style="grid-template-columns:repeat(4,1fr);gap:10px;margin-top:10px">
+        <div class="field"><label>НМЦК, ₽</label><input id="dpSum" type="number" value="${tender?.tender?.sum || ''}" placeholder="4850000"></div>
+        <div class="field"><label>Срок поставки, дней</label><input id="dpDays" type="number" value="${tender?.tender?.delivery_days || ''}" placeholder="30"></div>
+        <div class="field"><label>Планируемое снижение, %</label><input id="dpDiscount" type="number" value="0" min="0" max="70"></div>
+        <div class="field" style="display:flex;align-items:flex-end"><button class="btn primary" data-run-dopusk style="width:100%">Проверить</button></div>
+      </div>
+      <div class="tiny muted" style="margin-top:4px">Проверка учитывает профиль завода: цикл производства, сертификаты, лимит заказа.</div>
+    </div></div>
+  </div>
+  <div id="dpOut">${tender ? '<div class="skel" style="height:240px"></div>' : ''}</div>`;
+
+  const run = async () => {
+    const out = $('#dpOut');
+    out.innerHTML = '<div class="skel" style="height:240px"></div>';
+    const body = {
+      tender_id: tid || null,
+      text: $('#dpText').value.trim() || null,
+      discount_pct: Number($('#dpDiscount').value || 0),
+      sum: Number($('#dpSum').value || 0) || null,
+      delivery_days: Number($('#dpDays').value || 0) || null,
+    };
+    try {
+      const d = await api('/dopusk', { method: 'POST', body: JSON.stringify(body) });
+      out.innerHTML = dopuskResult(d);
+    } catch (e) {
+      out.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+    }
+  };
+  $('[data-run-dopusk]')?.addEventListener('click', run);
+  if (tid) run();
+}
+
 async function renderBilling() {
   const content = $('#content');
   content.innerHTML = `<div class="page-head"><div><h2>Тариф и оплата</h2></div></div>
@@ -1666,7 +1793,7 @@ function bindAdmin() {
 /* ================= ROUTER / BOOT ================= */
 async function route() {
   if (!state.user) return renderLogin();
-  const hash = location.hash.replace('#/', '') || 'dashboard';
+  const hash = (location.hash || '').replace(/^#\/?/, '') || 'dashboard';
   const [view, arg] = hash.split('/');
   $$('.nav-item').forEach((el) => el.classList.toggle('active', el.dataset.nav === (view === 'tender' ? 'tenders' : view)));
   if (view === 'dashboard') await renderDashboard();
@@ -1676,6 +1803,7 @@ async function route() {
   else if (view === 'ai') await renderAiSettings();
   else if (view === 'analytics') { await loadTenders(); await renderAnalytics(); }
   else if (view === 'sources') await renderSources();
+  else if (view === 'dopusk') await renderDopusk(arg);
   else if (view === 'billing') await renderBilling();
   else if (view === 'admin' && state.user?.role === 'owner') await renderAdmin();
   else await renderDashboard();
