@@ -1,5 +1,7 @@
+# Только пакеты с готовыми wheel-сборками: ничего не компилируется,
+# Visual C++ Build Tools не нужны.
 fastapi>=0.110
-uvicorn[standard]>=0.27
+uvicorn>=0.27
 httpx>=0.27
 python-multipart>=0.0.9
 pypdf>=4.0
