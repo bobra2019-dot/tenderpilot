@@ -9,3 +9,6 @@ node_modules/
 .env
 inbox/_processed/
 !inbox/_example.csv
+
+# рабочая база не поставляется — создаётся при первом запуске
+data/*.db
