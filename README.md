@@ -48,13 +48,27 @@
 
 ## Запуск
 
+### Windows — самый простой способ
+
+1. Скачайте проект: на странице GitHub зелёная кнопка **Code → Download ZIP**.
+2. Распакуйте архив (правая кнопка на файле → «Извлечь все»).
+3. Зайдите в получившуюся папку и запустите **`start.bat`** двойным кликом.
+   Скрипт сам найдёт Python, поставит библиотеки, создаст базу и откроет браузер.
+
+Если Python не установлен — скачайте с [python.org](https://www.python.org/downloads/)
+и при установке отметьте галочку **«Add python.exe to PATH»**.
+
+### Linux / macOS
+
 ```bash
 cd tenderpilot
-./run.sh                  # http://localhost:8000
-# или
+./run.sh                  # поставит зависимости и запустит сервер
+# или вручную
 pip install -r requirements.txt
 python3 -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
+
+Откройте **http://localhost:8000**, вход: `owner@zavod.ru` / `demo1234`.
 
 Сброс демо-данных: удалить `data/tenderpilot.db` и перезапустить.
 
