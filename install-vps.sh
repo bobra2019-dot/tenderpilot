@@ -23,6 +23,16 @@ die()  { printf '\n\033[1;31mОШИБКА: %s\033[0m\n' "$*" >&2; exit 1; }
 [ "$(id -u)" -eq 0 ] || die "запустите от root: sudo bash -c '...' либо войдите как root"
 
 # ---------- 1. что за система ----------
+cat <<'BANNER'
+TenderPilot установщик. Что он меняет на сервере:
+  + ставит Docker (если его нет) и пакеты git/curl/tar
+  + создаёт папку проекта (по умолчанию /opt/tenderpilot)
+  + запускает ОДИН контейнер на порту 8000
+  + открывает порт в файрволе (добавляет разрешение, ничего не запрещает)
+Другие проекты, сайты, базы, nginx и файлы вне папки проекта не затрагиваются.
+Удалять, останавливать или перенастраивать чужие сервисы скрипт не умеет.
+BANNER
+
 say "Проверяю систему"
 if command -v apt-get >/dev/null 2>&1; then
     PKG=apt
@@ -63,9 +73,17 @@ fi
 # ---------- 4. код ----------
 say "Скачиваю TenderPilot в $DIR"
 if [ -d "$DIR/.git" ]; then
-    git -C "$DIR" fetch --quiet origin main
-    git -C "$DIR" reset --hard --quiet origin/main
-    ok "обновил существующую установку"
+    REMOTE="$(git -C "$DIR" remote get-url origin 2>/dev/null || true)"
+    case "$REMOTE" in
+        *tenderpilot*)
+            git -C "$DIR" fetch --quiet origin main
+            git -C "$DIR" reset --hard --quiet origin/main
+            ok "обновил существующую установку TenderPilot" ;;
+        *)
+            die "в $DIR уже лежит ДРУГОЙ проект (git: ${REMOTE:-без origin}). Ничего не трогаю.
+    Установите TenderPilot в свою папку, например:
+    TENDERPILOT_DIR=/opt/tenderpilot-app curl -fsSL ... | bash" ;;
+    esac
 else
     mkdir -p "$(dirname "$DIR")"
     [ -d "$DIR" ] && [ -n "$(ls -A "$DIR" 2>/dev/null)" ] && die "$DIR не пуста и это не git-репозиторий"
@@ -80,7 +98,24 @@ if [ -n "$PUBLIC_URL" ]; then
 fi
 ok "папки data/ и inbox/ готовы"
 
-# ---------- 5. запуск ----------
+# ---------- 5. проверка порта (чтобы не мешать другим проектам) ----------
+say "Проверяю, свободен ли порт $PORT"
+if command -v ss >/dev/null 2>&1 && ss -ltn 2>/dev/null | awk '{print $4}' | grep -qE "[:.]${PORT}$"; then
+    OWN="$(docker ps --filter "publish=${PORT}" --format '{{.Names}}' 2>/dev/null | head -1 || true)"
+    if [ "$OWN" = "tenderpilot" ]; then
+        ok "порт $PORT занят нашим же контейнером — перезапускаю его"
+    else
+        docker ps --format 'table {{.Names}}	{{.Ports}}' 2>/dev/null | head -10
+        die "порт $PORT уже занят другим приложением. Ваши проекты я не трогаю.
+    Запустите TenderPilot на другом порту:
+    PORT=8080 TENDERPILOT_DIR=... curl -fsSL ... | bash
+    или:  cd $DIR && sed -i 's/^PORT=.*/PORT=8080/' .env && docker compose up -d"
+    fi
+else
+    ok "порт $PORT свободен"
+fi
+
+# ---------- 6. запуск ----------
 say "Собираю контейнер (2-4 минуты, качает зависимости)"
 docker compose up -d --build 2>&1 | tail -5
 ok "контейнер поднят"
