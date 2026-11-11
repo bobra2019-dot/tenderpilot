@@ -5,5 +5,4 @@ venv/
 data/*-wal
 data/*-shm
 .DS_Store
-dist/
 node_modules/
