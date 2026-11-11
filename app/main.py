@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, db, scoring
+from . import ai, db, ingest, notify, scheduler, scoring, sources as src_mod
 from .catalog import CATEGORIES, CATEGORY_BY_ID, PLATFORM_BY_ID, PLATFORMS, REGIONS, STAGES
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -25,6 +25,13 @@ app = FastAPI(title="TenderPilot", docs_url="/api/docs", openapi_url="/api/opena
 @app.on_event("startup")
 def _startup():
     db.init_db()
+    ingest.ensure_dirs()
+    scheduler.start()
+
+
+@app.on_event("shutdown")
+def _shutdown():
+    scheduler.stop()
 
 
 # ---------------- авторизация ----------------
@@ -633,6 +640,201 @@ def stats(user=Depends(current_user)):
         "top": sorted(go, key=lambda t: -(t["match"]["score"] + t["margin"]["margin_pct"]))[:5],
         "deadline_soon": sorted([t for t in items if 0 <= t["days_left"] <= 7], key=lambda t: t["days_left"])[:6],
     }
+
+
+# ---------------- источники данных (реальный сбор) ----------------
+@app.get("/api/sources")
+def sources_list(user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        return {"sources": ingest.get_sources(conn), "schedule": scheduler.get_schedule(conn)}
+    finally:
+        conn.close()
+
+
+@app.put("/api/sources")
+def sources_put(payload: dict, user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        items = payload.get("sources")
+        if isinstance(items, list):
+            ingest.save_sources(conn, items)
+        if isinstance(payload.get("schedule"), dict):
+            scheduler.set_schedule(conn, payload["schedule"])
+        return {"ok": True, "sources": ingest.get_sources(conn), "schedule": scheduler.get_schedule(conn)}
+    finally:
+        conn.close()
+
+
+class RunSourceIn(BaseModel):
+    ids: Optional[list] = None
+    analyze: bool = True
+
+
+@app.post("/api/sources/run")
+async def sources_run(data: RunSourceIn = RunSourceIn(), user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        before = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
+        results = await ingest.run_all(conn, data.ids)
+        after = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
+        analyzed = 0
+        if data.analyze and after > before:
+            company = db.get_company(conn)
+            cfg = db.get_ai_settings(conn)
+            analyzed = ingest.auto_analyze_new(conn, company, cfg)
+        return {"results": results, "new": after - before, "analyzed": analyzed}
+    finally:
+        conn.close()
+
+
+@app.get("/api/logs")
+def logs(user=Depends(current_user), limit: int = 60):
+    conn = db.connect()
+    try:
+        rows = conn.execute("SELECT * FROM ingest_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        inbox_files = []
+        if os.path.isdir(ingest.INBOX):
+            for f in sorted(os.listdir(ingest.INBOX)):
+                fp = os.path.join(ingest.INBOX, f)
+                if os.path.isfile(fp):
+                    inbox_files.append({"name": f, "size": os.path.getsize(fp)})
+    finally:
+        conn.close()
+    return {"logs": [dict(r) for r in rows], "inbox": inbox_files, "inbox_path": ingest.INBOX}
+
+
+@app.post("/api/ingest/upload")
+async def ingest_upload(file: UploadFile = File(...), user=Depends(current_user)):
+    """Загрузка файла выгрузки: XML ЕИС, CSV/Excel-выгрузка ЭТП, ZIP-архив."""
+    ingest.ensure_dirs()
+    name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
+    blob = await file.read()
+    if len(blob) > 60 * 1024 * 1024:
+        raise HTTPException(400, "Файл больше 60 МБ — загружайте частями")
+    path = os.path.join(ingest.INBOX, name)
+    with open(path, "wb") as f:
+        f.write(blob)
+
+    low = name.lower()
+    items = []
+    try:
+        if low.endswith(".zip"):
+            import zipfile as _zf
+            with _zf.ZipFile(path) as z:
+                for inner in z.namelist():
+                    if inner.lower().endswith((".xml", ".csv")):
+                        text = z.read(inner).decode("utf-8", "ignore")
+                        items += src_mod.parse_eis_xml(text) if inner.lower().endswith(".xml") else src_mod.parse_csv_rows(text)
+        elif low.endswith(".xml"):
+            items = src_mod.parse_eis_xml(blob.decode("utf-8", "ignore"))
+        elif low.endswith((".csv", ".txt")):
+            items = src_mod.parse_csv_rows(blob.decode("utf-8", "ignore"))
+        else:
+            raise HTTPException(400, "Поддерживаются XML, CSV, TXT и ZIP")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(400, f"Не удалось разобрать файл: {e}")
+
+    conn = db.connect()
+    try:
+        added = 0
+        for t in items:
+            if ingest.save_tender(conn, t):
+                added += 1
+        conn.commit()
+        ingest.log(conn, "upload", "ok", f"{name}: распознано {len(items)}, новых {added}", len(items), added)
+        company = db.get_company(conn)
+        cfg = db.get_ai_settings(conn)
+        analyzed = ingest.auto_analyze_new(conn, company, cfg) if added else 0
+    finally:
+        conn.close()
+    return {"file": name, "recognized": len(items), "added": added, "analyzed": analyzed}
+
+
+@app.post("/api/ingest/scan-inbox")
+def scan_inbox(user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        ingest.ensure_dirs()
+        res = src_mod.parse_files_in_inbox(ingest.INBOX, ingest.PROCESSED)
+        added = 0
+        for t in res["items"]:
+            if ingest.save_tender(conn, t):
+                added += 1
+        conn.commit()
+        ingest.log(conn, "inbox", "ok" if not res["errors"] else "warn",
+                   f"файлов {len(res['files'])}, распознано {len(res['items'])}, новых {added}"
+                   + ("; ошибки: " + "; ".join(res["errors"][:3]) if res["errors"] else ""),
+                   len(res["items"]), added)
+        company = db.get_company(conn)
+        cfg = db.get_ai_settings(conn)
+        analyzed = ingest.auto_analyze_new(conn, company, cfg) if added else 0
+        return {"files": res["files"], "recognized": len(res["items"]), "added": added,
+                "analyzed": analyzed, "errors": res["errors"]}
+    finally:
+        conn.close()
+
+
+@app.get("/api/sources/check")
+async def sources_check(user=Depends(current_user)):
+    """Проверка доступности площадок из текущей сети (важно для российских IP)."""
+    import httpx as _httpx
+    targets = {
+        "ЕИС (zakupki.gov.ru)": "https://zakupki.gov.ru/epz/order/extendedsearch/results.html",
+        "Росэлторг": "https://www.roseltorg.ru",
+        "B2B-Center": "https://www.b2b-center.ru",
+        "ЭТП ГПБ": "https://etpgpb.ru",
+        "ТЭК-Торг": "https://tektorg.ru",
+        "Росатом": "https://zakupki.rosatom.ru",
+        "Сбер А": "https://www.sberbank-ast.ru",
+    }
+    out = []
+    async with _httpx.AsyncClient(timeout=12, follow_redirects=True,
+                                  headers={"User-Agent": src_mod.UA}) as client:
+        for name, url in targets.items():
+            try:
+                r = await client.get(url)
+                ok = r.status_code < 400
+                out.append({"name": name, "url": url, "status": r.status_code, "ok": ok})
+            except Exception as e:
+                out.append({"name": name, "url": url, "status": None, "ok": False, "error": str(e)[:120]})
+    return {"results": out}
+
+
+# ---------------- уведомления ----------------
+@app.get("/api/notify")
+def notify_get(user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        return {"notify": notify.get_notify(conn)}
+    finally:
+        conn.close()
+
+
+@app.put("/api/notify")
+def notify_put(payload: dict, user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        notify.set_notify(conn, payload or {})
+        return {"ok": True, "notify": notify.get_notify(conn)}
+    finally:
+        conn.close()
+
+
+@app.post("/api/notify/test")
+async def notify_test(user=Depends(current_user)):
+    conn = db.connect()
+    try:
+        cfg = notify.get_notify(conn, mask=False)
+    finally:
+        conn.close()
+    text = "🔔 TenderPilot: уведомления настроены. Сюда будут приходить закупки с вердиктом «идём»."
+    res = await notify.telegram_send(cfg, text)
+    if not res.get("ok") and cfg.get("email", {}).get("enabled"):
+        res = notify.email_send(cfg, "TenderPilot: проверка", text)
+    return res
 
 
 # ---------------- статика ----------------

@@ -6,3 +6,6 @@ data/*-wal
 data/*-shm
 .DS_Store
 node_modules/
+.env
+inbox/_processed/
+!inbox/_example.csv

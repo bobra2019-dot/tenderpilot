@@ -1,0 +1,14 @@
+services:
+  tenderpilot:
+    build: .
+    container_name: tenderpilot
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # адрес, который подставляется в ссылки уведомлений
+      PUBLIC_URL: ${PUBLIC_URL:-http://localhost:8000}
+    volumes:
+      # база данных и папка с выгрузками живут на хосте — не теряются при обновлении
+      - ./data:/app/data
+      - ./inbox:/app/inbox

@@ -90,6 +90,7 @@ const NAV = [
   { id: 'dashboard', name: 'Дашборд', ico: '◧' },
   { id: 'tenders', name: 'Лента тендеров', ico: '☰' },
   { id: 'analytics', name: 'Аналитика', ico: '◔' },
+  { id: 'sources', name: 'Источники данных', ico: '⇄' },
   { sep: 'Настройка' },
   { id: 'profile', name: 'Профиль завода', ico: '⚙' },
   { id: 'ai', name: 'Настройки ИИ', ico: '✳' },
@@ -1051,6 +1052,216 @@ async function analyzeNew() {
   route();
 }
 
+
+/* ================= SOURCES (реальный сбор данных) ================= */
+async function renderSources() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-head"><div><h2>Источники данных</h2><p>Реальный сбор закупок: ЕИС, выгрузки ЭТП, API площадок</p></div></div>
+    <div class="card"><div class="card-body"><div class="skel" style="height:220px"></div></div></div>`;
+  const [{ sources, schedule }, logsRes, notifyRes] = await Promise.all([
+    api('/sources'), api('/logs'), api('/notify'),
+  ]);
+  state.sources = sources; state.schedule = schedule; state.notify = notifyRes.notify;
+  content.innerHTML = `
+  <div class="page-head">
+    <div><h2>Источники данных</h2><p>Сбор закупок из ЕИС и выгрузок площадок, автоотсев ИИ и уведомления</p></div>
+    <div class="spacer"></div>
+    <button class="btn" data-check>Проверить доступность площадок</button>
+    <button class="btn primary" data-run>⟳ Собрать сейчас</button>
+  </div>
+
+  <div class="split">
+    <div class="stack">
+      <div class="card">
+        <div class="card-head">Источники</div>
+        <div class="card-body stack" id="srcList">
+          ${(sources || []).map((src) => `
+            <div class="card" style="box-shadow:none;border-color:${src.enabled ? 'var(--brand-2)' : 'var(--line)'};background:${src.enabled ? 'var(--brand-soft)' : '#fff'}">
+              <div class="card-body" style="padding:13px 14px">
+                <div style="display:flex;gap:10px;align-items:flex-start">
+                  <input type="checkbox" data-src-toggle="${src.id}" ${src.enabled ? 'checked' : ''} style="margin-top:3px;width:auto">
+                  <div style="flex:1;min-width:0">
+                    <b style="font-size:13.5px">${esc(src.name)}</b>
+                    <div class="tiny muted" style="margin-top:2px">${esc(src.note || '')}</div>
+                    ${src.type === 'eis_search' ? `
+                      <div style="margin-top:8px;display:grid;gap:6px">
+                        <input data-src-field="${src.id}:keywords" value="${esc((src.params.keywords || []).join(', '))}" placeholder="Ключевые слова через запятую: задвижка, затвор, арматура" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                        <div style="display:flex;gap:6px;align-items:center">
+                          <span class="tiny muted" style="white-space:nowrap">Страниц</span>
+                          <input type="number" data-src-field="${src.id}:pages" value="${src.params.pages || 2}" min="1" max="5" style="width:80px;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="Страниц выдачи">
+                          <span class="tiny muted" style="white-space:nowrap">Мин. сумма, ₽</span>
+                          <input type="number" data-src-field="${src.id}:min_sum" value="${src.params.min_sum || 0}" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="Мин. сумма закупки, ₽">
+                        </div>
+                      </div>` : ''}
+                    ${src.type === 'etp_api' ? `
+                      <div style="margin-top:8px;display:grid;gap:6px">
+                        <input data-src-field="${src.id}:url" value="${esc(src.params.url || '')}" placeholder="https://api.etp.ru/v1/purchases?status=active" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                        <input data-src-field="${src.id}:token" value="${esc(src.params.token || '')}" placeholder="Bearer-токен площадки" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+                      </div>` : ''}
+                    ${src.type === 'files_watch' ? `
+                      <div class="tiny" style="margin-top:8px">Папка <code>${esc(state.logs?.inbox_path || 'inbox')}</code> — файлы обрабатываются автоматически. Можно загрузить прямо здесь:
+                        <div style="margin-top:7px;display:flex;gap:7px;align-items:center;flex-wrap:wrap">
+                          <input type="file" id="ingestFile" accept=".xml,.csv,.txt,.zip" style="font-size:12px">
+                          <button class="btn sm" data-upload>Загрузить и разобрать</button>
+                        </div>
+                      </div>` : ''}
+                  </div>
+                </div>
+              </div>
+            </div>`).join('')}
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">Расписание и уведомления</div>
+        <div class="card-body">
+          <div class="form-grid">
+            <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="schEnabled" ${schedule.enabled ? 'checked' : ''} style="width:auto"> Автоматический сбор по расписанию</label></div>
+            <div class="field"><label>Интервал, минут</label><input type="number" id="schInterval" min="5" value="${schedule.interval_minutes || 60}"></div>
+            <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="schNotify" ${schedule.notify_new ? 'checked' : ''} style="width:auto"> Уведомлять о новых закупках</label></div>
+            <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="schAnalyze" ${schedule.auto_analyze ? 'checked' : ''} style="width:auto"> Автоматически отсеивать через ИИ</label></div>
+            <div class="field"><label>Telegram: токен бота</label><input type="password" id="tgToken" placeholder="${state.notify.telegram_token_set ? 'токен сохранён — оставьте пустым' : '123456789:AAH...'}"></div>
+            <div class="field"><label>Telegram: chat_id</label><input id="tgChat" value="${esc(state.notify.telegram_chat_hint || state.notify.telegram_chat || '')}" placeholder="например 123456789 или -1001234567890"></div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <button class="btn primary" data-save-all>Сохранить настройки</button>
+            <button class="btn" data-tg-test>Проверить уведомление</button>
+          </div>
+          <div class="tiny muted" style="margin-top:8px">Бот создаётся в @BotFather, chat_id узнаётся у @userinfobot. Уведомления приходят по закупкам с вердиктом «идём».</div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-head">Журнал сбора</div>
+        <div class="card-body" style="padding:0">
+          <div class="table-wrap" style="max-height:320px"><table class="t">
+            <thead><tr><th>Время</th><th>Источник</th><th>Результат</th><th>Найдено</th><th>Новых</th></tr></thead>
+            <tbody>${(logsRes.logs || []).length ? logsRes.logs.map((l) => `<tr>
+              <td class="tiny nowrap">${esc((l.created_at || '').replace('T', ' ').slice(5, 16))}</td>
+              <td class="tiny">${esc(l.source_id)}</td>
+              <td class="tiny" style="color:${l.status === 'ok' ? 'var(--ok)' : l.status === 'error' ? 'var(--bad)' : 'var(--warn)'}">${esc(l.message)}</td>
+              <td class="num">${l.found}</td><td class="num">${l.added}</td></tr>`).join('')
+              : '<tr><td colspan="5"><div class="empty">Пока не было запусков</div></td></tr>'}</tbody>
+          </table></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="stack">
+      <div class="card">
+        <div class="card-head">Как это работает</div>
+        <div class="card-body tiny muted" style="display:grid;gap:9px">
+          <div><b style="color:var(--ink)">1. ЕИС (44-ФЗ и 223-ФЗ)</b> — официальный источник. Живой поиск работает с российского IP: zakupki.gov.ru блокирует зарубежные адреса.</div>
+          <div><b style="color:var(--ink)">2. Выгрузки ЭТП</b> — экспорт Excel/CSV с Росэлторга, B2B-Center, ЭТП ГПБ, ТЭК-Торга загружается сюда же и разбирается автоматически.</div>
+          <div><b style="color:var(--ink)">3. XML ЕИС</b> — на карточке закупки на zakupki.gov.ru есть кнопка «Скачать XML». Файл загружается или кладётся в папку inbox.</div>
+          <div><b style="color:var(--ink)">4. API площадки</b> — если у вас есть договор и токен, укажите адрес и путь к списку закупок.</div>
+          <div style="padding-top:6px;border-top:1px solid var(--line-2)">Дедупликация идёт по паре «площадка + номер закупки», повторы не создаются.</div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-head">Файлы в inbox</div>
+        <div class="card-body">
+          ${(logsRes.inbox || []).length ? logsRes.inbox.map((f) => `<div class="tiny" style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px dashed var(--line-2)"><span>${esc(f.name)}</span><span class="muted">${Math.round(f.size / 1024)} КБ</span></div>`).join('')
+            : '<div class="tiny muted">Папка пуста. Загрузите XML/CSV — или положите файлы в папку вручную.</div>'}
+          <button class="btn sm" data-scan-inbox style="margin-top:10px">Обработать папку</button>
+        </div>
+      </div>
+      <div class="card" id="checkOut" style="display:none">
+        <div class="card-head">Доступность площадок</div>
+        <div class="card-body" id="checkBody"></div>
+      </div>
+    </div>
+  </div>`;
+  bindSources();
+}
+
+function bindSources() {
+  const readSrc = () => {
+    const srcs = JSON.parse(JSON.stringify(state.sources || []));
+    $$('[data-src-toggle]').forEach((el) => {
+      const s = srcs.find((x) => x.id === el.dataset.srcToggle);
+      if (s) s.enabled = el.checked;
+    });
+    $$('[data-src-field]').forEach((el) => {
+      const [id, field] = el.dataset.srcField.split(':');
+      const s = srcs.find((x) => x.id === id);
+      if (!s) return;
+      let v = el.value;
+      if (field === 'keywords') v = v.split(',').map((x) => x.trim()).filter(Boolean);
+      else if (field === 'pages' || field === 'min_sum') v = Number(v) || 0;
+      s.params[field] = v;
+    });
+    return srcs;
+  };
+  const saveAll = async (silent) => {
+    const payload = {
+      sources: readSrc(),
+      schedule: {
+        enabled: $('#schEnabled').checked,
+        interval_minutes: Number($('#schInterval').value) || 60,
+        notify_new: $('#schNotify').checked,
+        auto_analyze: $('#schAnalyze').checked,
+      },
+    };
+    await api('/sources', { method: 'PUT', body: JSON.stringify(payload) });
+    const nPayload = { telegram_chat: $('#tgChat').value.trim() };
+    const tok = $('#tgToken').value.trim();
+    if (tok) nPayload.telegram_token = tok;
+    await api('/notify', { method: 'PUT', body: JSON.stringify(nPayload) });
+    if (!silent) toast('Настройки источников сохранены', 'ok');
+  };
+  $('[data-save-all]')?.addEventListener('click', () => saveAll(false));
+  $('[data-run]')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.innerHTML = '<span class="spinner"></span> Собираем…';
+    try {
+      await saveAll(true);
+      const r = await api('/sources/run', { method: 'POST', body: JSON.stringify({ analyze: true }) });
+      const errs = (r.results || []).flatMap((x) => (x.errors || []).map((e) => x.source + ': ' + e));
+      toast(r.new ? `Собрано новых закупок: ${r.new}, проанализировано: ${r.analyzed}` : 'Новых закупок не найдено',
+        r.new ? 'ok' : '', 6000);
+      if (errs.length) toast(errs.join(' | '), 'err', 12000);
+      await loadTenders();
+      await renderSources();
+    } catch (err) { toast(err.message, 'err'); b.disabled = false; }
+  });
+  $('[data-upload]')?.addEventListener('click', async () => {
+    const f = $('#ingestFile')?.files?.[0];
+    if (!f) { toast('Выберите файл XML, CSV или ZIP', 'err'); return; }
+    const fd = new FormData(); fd.append('file', f);
+    try {
+      const r = await api('/ingest/upload', { method: 'POST', body: fd });
+      toast(`Разобрано ${r.recognized}, добавлено новых ${r.added}` + (r.analyzed ? `, отсеяно ИИ ${r.analyzed}` : ''), 'ok', 6000);
+      await loadTenders(); await renderSources();
+    } catch (e) { toast(e.message, 'err', 8000); }
+  });
+  $('[data-scan-inbox]')?.addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const r = await api('/ingest/scan-inbox', { method: 'POST' });
+      toast(`Файлов ${(r.files || []).length}, добавлено ${r.added}`, 'ok');
+      if ((r.errors || []).length) toast(r.errors.join(' | '), 'err', 8000);
+      await loadTenders(); await renderSources();
+    } catch (err) { toast(err.message, 'err'); }
+  });
+  $('[data-check]')?.addEventListener('click', async (e) => {
+    const b = e.currentTarget; b.disabled = true; b.innerHTML = '<span class="spinner dark"></span> Проверяем…';
+    try {
+      const r = await api('/sources/check');
+      $('#checkOut').style.display = '';
+      $('#checkBody').innerHTML = r.results.map((x) => `<div style="display:flex;justify-content:space-between;padding:5px 0;border-bottom:1px dashed var(--line-2);font-size:12.8px">
+        <span>${esc(x.name)}</span>
+        <b style="color:${x.ok ? 'var(--ok)' : 'var(--bad)'}">${x.ok ? 'доступен' : (x.status ? 'HTTP ' + x.status : 'нет связи')}</b></div>`).join('')
+        + `<div class="tiny muted" style="margin-top:8px">Если ЕИС недоступен — запускайте приложение с российского IP (домашний компьютер или VPS в РФ).</div>`;
+    } catch (err) { toast(err.message, 'err'); }
+    b.disabled = false; b.textContent = 'Проверить доступность площадок';
+  });
+  $('[data-tg-test]')?.addEventListener('click', async () => {
+    await saveAll(true);
+    const r = await api('/notify/test', { method: 'POST' });
+    toast(r.ok ? 'Уведомление отправлено — проверьте Telegram' : 'Ошибка: ' + (r.error || 'не настроено'), r.ok ? 'ok' : 'err', 8000);
+  });
+}
+
 /* ================= ROUTER / BOOT ================= */
 async function route() {
   if (!state.user) return renderLogin();
@@ -1063,6 +1274,7 @@ async function route() {
   else if (view === 'profile') await renderProfile();
   else if (view === 'ai') await renderAiSettings();
   else if (view === 'analytics') { await loadTenders(); await renderAnalytics(); }
+  else if (view === 'sources') await renderSources();
   else await renderDashboard();
 }
 
