@@ -240,6 +240,25 @@ def _detect_region(text: str) -> str:
     return ""
 
 
+def eis_proxy(params: Optional[dict] = None) -> Optional[str]:
+    """Прокси для запросов к ЕИС.
+
+    Нужен, когда приложение стоит на зарубежном сервере: zakupki.gov.ru не отвечает
+    на иностранные адреса. Указывается в настройках источника или в переменной
+    окружения EIS_PROXY (например http://user:pass@185.10.10.10:8888 или socks5://...).
+    """
+    raw = ""
+    if params:
+        raw = str(params.get("proxy") or "").strip()
+    if not raw:
+        raw = os.environ.get("EIS_PROXY", "").strip()
+    if not raw:
+        return None
+    if "://" not in raw:
+        raw = "http://" + raw
+    return raw
+
+
 async def fetch_eis_search(params: dict) -> List[Dict[str, Any]]:
     """Живой поиск по ЕИС. Возвращает нормализованные закупки."""
     keywords = [k for k in (params.get("keywords") or []) if k.strip()]
@@ -255,7 +274,11 @@ async def fetch_eis_search(params: dict) -> List[Dict[str, Any]]:
         "Referer": EIS_BASE + "/",
     }
     timeout = httpx.Timeout(40.0, connect=15.0)
-    async with httpx.AsyncClient(timeout=timeout, follow_redirects=True, headers=headers) as client:
+    client_kw = {"timeout": timeout, "follow_redirects": True, "headers": headers}
+    proxy = eis_proxy(params)
+    if proxy:
+        client_kw["proxy"] = proxy
+    async with httpx.AsyncClient(**client_kw) as client:
         for kw in keywords[:5]:
             for page in range(1, pages + 1):
                 q = {
@@ -274,9 +297,9 @@ async def fetch_eis_search(params: dict) -> List[Dict[str, Any]]:
                 except Exception as e:
                     detail = str(e) or type(e).__name__
                     raise RuntimeError(
-                        f"ЕИС недоступен ({detail}). zakupki.gov.ru блокирует зарубежные адреса: "
-                        f"запустите приложение на компьютере или VPS в России, либо используйте "
-                        f"выгрузки XML/CSV (они работают из любой сети).")
+                        f"ЕИС недоступен ({detail}). zakupki.gov.ru не отвечает зарубежным адресам: "
+                        f"укажите российский прокси в настройках источника (поле «Прокси») "
+                        f"или в переменной EIS_PROXY; выгрузки XML/CSV работают и без прокси.")
                 if r.status_code != 200:
                     raise RuntimeError(f"ЕИС ответил HTTP {r.status_code}. Обычно это блокировка зарубежных IP или защита от роботов.")
                 law = "44-ФЗ" if params.get("fz44") else "223-ФЗ"

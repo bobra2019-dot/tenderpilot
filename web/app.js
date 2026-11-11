@@ -1092,6 +1092,7 @@ async function renderSources() {
                           <span class="tiny muted" style="white-space:nowrap">Мин. сумма, ₽</span>
                           <input type="number" data-src-field="${src.id}:min_sum" value="${src.params.min_sum || 0}" style="flex:1;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px" title="Мин. сумма закупки, ₽">
                         </div>
+                        <input data-src-field="${src.id}:proxy" value="${esc(src.params.proxy || '')}" placeholder="Прокси для ЕИС (если сервер зарубежный): http://185.10.10.10:8888" style="width:100%;padding:7px 10px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
                       </div>` : ''}
                     ${src.type === 'etp_api' ? `
                       <div style="margin-top:8px;display:grid;gap:6px">
