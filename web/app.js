@@ -1440,13 +1440,49 @@ function showInvoice(inv, payment) {
 const ROLE_NAMES = { owner: 'Администратор', manager: 'Менеджер по тендерам', viewer: 'Наблюдатель' };
 const STATUS_NAMES = { pending: 'Ожидает подтверждения', active: 'Активен', blocked: 'Заблокирован' };
 
+const LEAD_STATUS = { new: 'Новая', taken: 'В работе', client: 'Клиент', refused: 'Отказ' };
+
+function renderLeadsCard(data) {
+  const items = data.leads || [];
+  const c = data.counts || {};
+  const rows = items.length ? items.map((l) => `
+    <tr>
+      <td class="tiny muted" style="white-space:nowrap">${esc((l.created_at || '').replace('T', ' ').slice(0, 16))}</td>
+      <td>
+        <div style="font-weight:600;font-size:13px">${esc(l.name || '—')}</div>
+        <div class="tiny muted">${esc(l.contact || '')}</div>
+      </td>
+      <td class="tiny">${esc(l.company || '—')}</td>
+      <td class="tiny">${esc(l.comment || '')}${l.plan ? `<div class="tiny muted">тариф: ${esc(l.plan)}</div>` : ''}</td>
+      <td>
+        <select data-lead-status="${l.id}" style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+          ${Object.entries(LEAD_STATUS).map(([k, v]) => `<option value="${k}" ${l.status === k ? 'selected' : ''}>${v}</option>`).join('')}
+        </select>
+      </td>
+    </tr>`).join('') : `<tr><td colspan="5"><div class="empty" style="padding:22px">Заявок пока нет. Кнопка «Получить разбор» на сайте создаёт заявку здесь.</div></td></tr>`;
+  return `
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head">Заявки с сайта
+      <span class="muted tiny" style="font-weight:400">новых: ${c.new || 0} · всего: ${c.total || 0}</span>
+      ${items.length ? '<a class="btn sm ghost" href="/api/admin/leads.csv" style="margin-left:auto">Выгрузить CSV</a>' : ''}
+    </div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table class="t">
+        <thead><tr><th>Дата</th><th>Контакт</th><th>Компания</th><th>Что нужно</th><th>Статус</th></tr></thead>
+        <tbody>${rows}</tbody>
+      </table></div>
+    </div>
+  </div>`;
+}
+
 async function renderAdmin() {
   const content = $('#content');
   content.innerHTML = `<div class="page-head"><div><h2>Администрирование</h2><p>Пользователи, доступы и регистрация</p></div></div>
     <div class="card"><div class="card-body"><div class="skel" style="height:260px"></div></div></div>`;
-  let d;
+  let d, leadsData = { leads: [], counts: {} };
   try { d = await api('/admin/overview'); }
   catch (e) { content.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  try { leadsData = await api('/admin/leads'); } catch (e) { /* заявки не критичны */ }
   state.admin = d;
   const t = d.totals;
   const badge = (s) => `<span class="pill" style="background:${s === 'active' ? 'var(--ok-soft, #e7f7ee)' : s === 'pending' ? '#fff4e0' : '#fdeaea'};color:${s === 'active' ? 'var(--ok)' : s === 'pending' ? '#b26a00' : 'var(--bad)'}">${STATUS_NAMES[s] || s}</span>`;
@@ -1500,16 +1536,34 @@ async function renderAdmin() {
     </div>
   </div>
 
+  ${renderLeadsCard(leadsData)}
+
   <div class="grid" style="grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:14px;align-items:start">
     <div class="card">
       <div class="card-head">Реквизиты для счетов</div>
       <div class="card-body">
         <div class="field"><label>Организация</label><input id="blCompany" value="${esc((d.billing.company_name || ''))}" placeholder="ООО «TenderPilot»"></div>
-        <div class="field" style="margin-top:8px"><label>ИНН</label><input id="blInn" value="${esc(d.billing.inn || '')}"></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div class="field"><label>ИНН</label><input id="blInn" value="${esc(d.billing.inn || '')}"></div>
+          <div class="field"><label>КПП</label><input id="blKpp" value="${esc(d.billing.kpp || '')}"></div>
+        </div>
+        <div class="field" style="margin-top:8px"><label>Юридический адрес</label><input id="blAddress" value="${esc(d.billing.address || '')}" placeholder="г. Москва, ул. ..."></div>
         <div class="field" style="margin-top:8px"><label>Расчётный счёт</label><input id="blAccount" value="${esc(d.billing.account || '')}"></div>
-        <div class="field" style="margin-top:8px"><label>Банк</label><input id="blBank" value="${esc(d.billing.bank || '')}" placeholder="ПАО Сбербанк, БИК 044525225"></div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px;margin-top:8px">
+          <div class="field"><label>Банк</label><input id="blBank" value="${esc(d.billing.bank || '')}" placeholder="ПАО Сбербанк"></div>
+          <div class="field"><label>БИК</label><input id="blBik" value="${esc(d.billing.bik || '')}"></div>
+        </div>
+        <div class="field" style="margin-top:8px"><label>Корр. счёт</label><input id="blCorr" value="${esc(d.billing.corr_account || '')}"></div>
         <button class="btn primary" data-save-billing style="margin-top:12px">Сохранить реквизиты</button>
         <div class="tiny muted" style="margin-top:9px">Попадут в счёт, который клиент получит на оплату. Пока не заполнены — в счёте стоит пометка «не заполнено».</div>
+        <div class="card-head" style="margin:16px 0 0;padding:0 0 8px;border-bottom:1px solid var(--line);font-size:13px">Контакты на сайте</div>
+        <div class="grid" style="grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">
+          <div class="field"><label>E-mail</label><input id="blEmail" value="${esc(d.billing.contact_email || '')}" placeholder="sales@example.ru"></div>
+          <div class="field"><label>Телефон</label><input id="blPhone" value="${esc(d.billing.contact_phone || '')}" placeholder="+7 900 000-00-00"></div>
+        </div>
+        <div class="field" style="margin-top:8px"><label>Telegram</label><input id="blTg" value="${esc(d.billing.contact_telegram || '')}" placeholder="@username или ссылка"></div>
+        <button class="btn primary" data-save-contacts style="margin-top:12px">Сохранить контакты</button>
+        <div class="tiny muted" style="margin-top:9px">Показываются в шапке и подвале сайта, кнопка «Связаться» открывает этот контакт. Пусто — контактов на сайте нет.</div>
       </div>
     </div>
     <div class="card">
@@ -1563,13 +1617,30 @@ function bindAdmin() {
     try { await api('/admin/users/' + b.dataset.del, { method: 'DELETE' }); toast('Пользователь удалён', 'ok'); await renderAdmin(); }
     catch (e) { toast(e.message, 'err'); }
   }));
+  $$('[data-lead-status]').forEach((el) => el.addEventListener('change', async () => {
+    try {
+      await api('/admin/leads/' + el.dataset.leadStatus, { method: 'PATCH', body: JSON.stringify({ status: el.value }) });
+      toast('Статус заявки обновлён');
+    } catch (e) { toast(e.message, 'err'); }
+  }));
+
   $('[data-save-billing]')?.addEventListener('click', async () => {
     try {
       await api('/admin/billing', { method: 'PUT', body: JSON.stringify({
-        company_name: $('#blCompany').value, inn: $('#blInn').value,
-        account: $('#blAccount').value, bank: $('#blBank').value,
+        company_name: $('#blCompany').value, inn: $('#blInn').value, kpp: $('#blKpp').value,
+        address: $('#blAddress').value, account: $('#blAccount').value, bank: $('#blBank').value,
+        bik: $('#blBik').value, corr_account: $('#blCorr').value,
       }) });
       toast('Реквизиты сохранены — они появятся в счетах', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $('[data-save-contacts]')?.addEventListener('click', async () => {
+    try {
+      await api('/admin/billing', { method: 'PUT', body: JSON.stringify({
+        contact_email: $('#blEmail').value.trim(), contact_phone: $('#blPhone').value.trim(),
+        contact_telegram: $('#blTg').value.trim(),
+      }) });
+      toast('Контакты сохранены — они появятся на сайте', 'ok');
     } catch (e) { toast(e.message, 'err'); }
   });
   $('[data-save-reg]')?.addEventListener('click', async () => {

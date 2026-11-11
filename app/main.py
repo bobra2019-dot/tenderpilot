@@ -14,7 +14,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import ai, billing, db, ingest, notify, scheduler, scoring, sources as src_mod
+from . import ai, billing, db, ingest, leads as leads_mod, notify, scheduler, scoring, sources as src_mod
 from .catalog import CATEGORIES, CATEGORY_BY_ID, PLATFORM_BY_ID, PLATFORMS, REGIONS, STAGES
 
 WEB_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "web")
@@ -780,8 +780,17 @@ def admin_overview(user=Depends(admin_user)):
             conn2.close()
     except Exception:
         plans_by_user = {}
+    try:
+        conn3 = db.connect()
+        try:
+            reqs = db.get_setting(conn3, "billing", 0, default={}) or {}
+        finally:
+            conn3.close()
+    except Exception:
+        reqs = {}
     return {
         "users": users,
+        "billing": reqs,
         "plans_by_user": plans_by_user,
         "registration": reg,
         "roles": db.ROLES,
@@ -796,6 +805,7 @@ def admin_overview(user=Depends(admin_user)):
             "events": events,
             "logs": logs,
         },
+        "leads": _leads_counts(),
         "recent_logs": recent,
     }
 
@@ -914,9 +924,23 @@ def plans_public():
         pay_cfg = billing.provider_config(conn)
     finally:
         conn.close()
+    conn2 = db.connect()
+    try:
+        reqs = db.get_setting(conn2, "billing", 0, default={}) or {}
+    except Exception:
+        reqs = {}
+    finally:
+        conn2.close()
+    contact = {
+        "email": reqs.get("contact_email") or "",
+        "phone": reqs.get("contact_phone") or "",
+        "telegram": reqs.get("contact_telegram") or "",
+        "company": reqs.get("company_name") or "",
+    }
     return {
         "plans": list(billing.PLANS.values()),
         "payment": {"invoice": True, "card": pay_cfg["enabled"], "provider": pay_cfg["provider"]},
+        "contact": contact,
     }
 
 
@@ -974,8 +998,15 @@ class BillingSettings(BaseModel):
     secret_key: Optional[str] = None
     company_name: Optional[str] = None
     inn: Optional[str] = None
+    kpp: Optional[str] = None
+    address: Optional[str] = None
     account: Optional[str] = None
     bank: Optional[str] = None
+    bik: Optional[str] = None
+    corr_account: Optional[str] = None
+    contact_email: Optional[str] = None
+    contact_phone: Optional[str] = None
+    contact_telegram: Optional[str] = None
 
 
 @app.get("/api/admin/billing")
@@ -1039,6 +1070,103 @@ def admin_set_plan(uid: int, data: PlanIn, user=Depends(admin_user)):
         return {"ok": True, "billing": info}
     finally:
         conn.close()
+
+
+# ---------------- заявки с публичной страницы ----------------
+class LeadIn(BaseModel):
+    name: str = ""
+    company: str = ""
+    contact: str = ""
+    comment: str = ""
+    plan: str = ""
+    source: str = "landing"
+
+
+_LEAD_HITS = {}
+
+
+def _leads_counts():
+    conn = db.connect()
+    try:
+        return leads_mod.counts(conn)
+    except Exception:
+        return {"new": 0, "total": 0}
+    finally:
+        conn.close()
+
+
+def _lead_rate_ok(ip):
+    now = datetime.now(timezone.utc).timestamp()
+    hits = [t for t in _LEAD_HITS.get(ip, []) if now - t < 3600]
+    if len(hits) >= 5:
+        _LEAD_HITS[ip] = hits
+        return False
+    hits.append(now)
+    _LEAD_HITS[ip] = hits
+    if len(_LEAD_HITS) > 5000:
+        _LEAD_HITS.clear()
+    return True
+
+
+@app.post("/api/lead")
+def lead_create(data: LeadIn, request: Request):
+    contact = leads_mod.clean(data.contact, 160)
+    name = leads_mod.clean(data.name, 120)
+    if len(contact) < 5:
+        raise HTTPException(400, "Укажите телефон, почту или Telegram — иначе не сможем ответить")
+    if len(name) < 2:
+        raise HTTPException(400, "Укажите, как к вам обращаться")
+    ip = (request.client.host if request.client else "") or ""
+    if not _lead_rate_ok(ip):
+        raise HTTPException(429, "Слишком много заявок с одного адреса. Напишите нам напрямую.")
+    if leads_mod.looks_like_spam(name, contact, data.comment):
+        raise HTTPException(400, "Проверьте контакт: похоже, он указан с ошибкой")
+    conn = db.connect()
+    try:
+        lid = leads_mod.create(conn, name, data.company, contact, data.comment,
+                               data.plan, data.source, ip)
+    finally:
+        conn.close()
+    return {"ok": True, "id": lid, "message": "Заявка принята. Ответим в рабочее время."}
+
+
+@app.get("/api/admin/leads")
+def admin_leads(user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        return {"leads": leads_mod.listing(conn), "counts": leads_mod.counts(conn),
+                "statuses": leads_mod.STATUSES}
+    finally:
+        conn.close()
+
+
+class LeadPatch(BaseModel):
+    status: Optional[str] = None
+    note: Optional[str] = None
+
+
+@app.patch("/api/admin/leads/{lid}")
+def admin_lead_patch(lid: int, data: LeadPatch, user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        try:
+            leads_mod.set_status(conn, lid, data.status or "new", data.note)
+        except ValueError:
+            raise HTTPException(400, "Неизвестный статус заявки")
+        return {"ok": True, "counts": leads_mod.counts(conn)}
+    finally:
+        conn.close()
+
+
+@app.get("/api/admin/leads.csv")
+def admin_leads_csv(user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        body = leads_mod.to_csv(conn)
+    finally:
+        conn.close()
+    return Response(content=body, media_type="text/csv; charset=utf-8",
+                    headers={"Content-Disposition": 'attachment; filename="leads.csv"'})
 
 
 # ---------------- источники данных (реальный сбор) ----------------
@@ -1264,6 +1392,31 @@ def app_page():
 @app.get("/pricing")
 def pricing_page():
     return FileResponse(os.path.join(WEB_DIR, "landing.html"))
+
+
+@app.get("/legal")
+@app.get("/offer")
+@app.get("/privacy")
+@app.get("/terms")
+def legal_page():
+    return FileResponse(os.path.join(WEB_DIR, "legal.html"))
+
+
+@app.get("/robots.txt")
+def robots_txt():
+    body = "User-agent: *\nDisallow: /app\nDisallow: /api/\nAllow: /\nAllow: /legal\n"
+    return Response(content=body, media_type="text/plain")
+
+
+@app.get("/sitemap.xml")
+def sitemap_xml():
+    body = ('<?xml version="1.0" encoding="UTF-8"?>'
+            '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">'
+            "<url><loc>/</loc><priority>1.0</priority></url>"
+            "<url><loc>/pricing</loc><priority>0.9</priority></url>"
+            "<url><loc>/legal</loc><priority>0.3</priority></url>"
+            "</urlset>")
+    return Response(content=body, media_type="application/xml")
 
 
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")

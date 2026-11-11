@@ -3,8 +3,24 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>TenderPilot — тендерный отдел завода. ИИ разбирает закупки и считает маржу</title>
-<meta name="description" content="TenderPilot мониторит госзакупки и коммерческие тендеры, читает ТЗ, сверяет требования с вашим производством, считает маржу и говорит: идём или не идём.">
+<title>TenderPilot — ИИ читает ТЗ, считает маржу и говорит: идём или не идём</title>
+<meta name="description" content="TenderPilot собирает закупки 44-ФЗ и 223-ФЗ, читает техническое задание, сверяет требования с вашим производством и сертификатами, считает маржу и даёт вердикт по каждой закупке. 7 дней и 10 разборов бесплатно.">
+<meta name="keywords" content="тендеры, госзакупки, 44-ФЗ, 223-ФЗ, разбор ТЗ, анализ тендеров, расчёт маржи, тендерный отдел">
+<link rel="canonical" href="/">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Тендерный отдел завода, который не устаёт">
+<meta property="og:description" content="ИИ читает ТЗ, сверяет требования с вашим производством, считает маржу и говорит: идём или не идём. 7 дней бесплатно, без карты.">
+<meta property="og:url" content="/">
+<meta name="theme-color" content="#2563eb">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Ctext x='32' y='43' font-family='Arial' font-size='28' font-weight='bold' fill='white' text-anchor='middle'%3ETP%3C/text%3E%3C/svg%3E">
+<script type="application/ld+json">
+{"@context":"https://schema.org","@type":"SoftwareApplication","name":"TenderPilot",
+"applicationCategory":"BusinessApplication","operatingSystem":"Web",
+"description":"Сервис разбора тендерной документации: вердикт по закупке, проверка требований ТЗ, расчёт маржи.",
+"offers":[{"@type":"Offer","name":"Соло","price":"6900","priceCurrency":"RUB"},
+{"@type":"Offer","name":"Завод","price":"14900","priceCurrency":"RUB"},
+{"@type":"Offer","name":"Отдел","price":"29900","priceCurrency":"RUB"}]}
+</script>
 <style>
   :root{
     --ink:#0f1729; --ink2:#43526b; --ink3:#7a879c; --line:#e4e9f2; --line2:#eef2f8;
@@ -13,9 +29,11 @@
     --r:14px; --sh:0 1px 2px rgba(16,24,40,.06),0 8px 24px -16px rgba(16,24,40,.18);
   }
   *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
   body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
        color:var(--ink);background:#fff;-webkit-font-smoothing:antialiased}
   a{color:inherit;text-decoration:none}
+  :focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:6px}
   .wrap{max-width:1120px;margin:0 auto;padding:0 20px}
   .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;border:0;cursor:pointer;
        padding:13px 22px;border-radius:11px;font-size:15px;font-weight:600;font-family:inherit;transition:.15s}
@@ -24,9 +42,13 @@
   .btn.ghost{background:#fff;color:var(--ink);border:1px solid var(--line)}
   .btn.ghost:hover{border-color:#c9d5e8;background:#fbfcfe}
   .btn.sm{padding:9px 15px;font-size:13.5px;border-radius:9px}
+  .nav-contact{font-size:13.5px;color:var(--ink2);font-weight:600;white-space:nowrap}
+  .nav-contact:hover{color:var(--brand)}
+  @media(max-width:1080px){.nav-contact{display:none!important}}
+  .btn.block{width:100%}
 
   /* header */
-  header{position:sticky;top:0;z-index:20;background:rgba(255,255,255,.9);backdrop-filter:blur(10px);
+  header{position:sticky;top:0;z-index:30;background:rgba(255,255,255,.92);backdrop-filter:blur(10px);
          border-bottom:1px solid var(--line2)}
   .nav{display:flex;align-items:center;gap:26px;height:66px}
   .logo{display:flex;align-items:center;gap:9px;font-weight:800;letter-spacing:-.3px;font-size:16.5px}
@@ -38,19 +60,23 @@
   @media(max-width:900px){.nav-links{display:none}}
 
   /* hero */
-  .hero{padding:64px 0 40px;background:
+  .hero{padding:60px 0 40px;background:
       radial-gradient(900px 420px at 78% -10%,#e8f0ff 0%,transparent 60%),
       radial-gradient(700px 320px at 8% 0%,#f0f6ff 0%,transparent 55%)}
-  .hero-grid{display:grid;grid-template-columns:1.08fr .92fr;gap:44px;align-items:center}
+  .hero-grid{display:grid;grid-template-columns:1.06fr .94fr;gap:44px;align-items:center}
   @media(max-width:980px){.hero-grid{grid-template-columns:1fr;gap:32px}}
   .eyebrow{display:inline-flex;align-items:center;gap:8px;background:var(--brand-soft);color:var(--brand-dark);
            font-size:12.5px;font-weight:700;padding:7px 12px;border-radius:999px;margin-bottom:18px}
   h1{font-size:44px;line-height:1.08;letter-spacing:-1.4px;margin:0 0 18px;font-weight:800}
-  @media(max-width:980px){h1{font-size:33px;letter-spacing:-.9px}}
+  @media(max-width:980px){h1{font-size:32px;letter-spacing:-.9px}}
   .lead{font-size:17.5px;line-height:1.55;color:var(--ink2);margin:0 0 26px;max-width:560px}
-  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:18px}
+  .hero-actions{display:flex;gap:12px;flex-wrap:wrap;margin-bottom:16px}
   .micro{font-size:13px;color:var(--ink3)}
   .micro b{color:var(--ink2)}
+  .trust{display:flex;gap:18px;flex-wrap:wrap;margin-top:22px;padding-top:18px;border-top:1px solid var(--line2);
+         font-size:12.8px;color:var(--ink3)}
+  .trust span{display:flex;align-items:center;gap:6px}
+  .trust i{color:var(--ok);font-style:normal;font-weight:800}
 
   /* mock card */
   .mock{background:#fff;border:1px solid var(--line);border-radius:18px;box-shadow:0 24px 60px -30px rgba(16,24,40,.35);overflow:hidden}
@@ -59,7 +85,7 @@
   .mock-body{padding:16px}
   .mrow{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-bottom:1px dashed var(--line2);font-size:13.3px}
   .mrow:last-child{border:0}
-  .tag{font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:6px}
+  .tag{font-size:11.5px;font-weight:700;padding:3px 8px;border-radius:6px;white-space:nowrap}
   .tag.go{background:#e7f7ee;color:var(--ok)}
   .tag.no{background:#fdeaea;color:var(--bad)}
   .tag.mid{background:#fff4e0;color:var(--warn)}
@@ -68,8 +94,10 @@
 
   /* sections */
   section{padding:64px 0}
-  .sec-head{max-width:720px;margin-bottom:34px}
+  .sec-head{max-width:740px;margin-bottom:34px}
+  .kicker{font-size:12.5px;font-weight:700;letter-spacing:.6px;text-transform:uppercase;color:var(--brand);margin-bottom:10px}
   h2{font-size:32px;letter-spacing:-.9px;margin:0 0 12px;font-weight:800}
+  @media(max-width:640px){h2{font-size:26px}}
   .sub{font-size:16px;color:var(--ink2);line-height:1.55;margin:0}
   .cards{display:grid;grid-template-columns:repeat(3,1fr);gap:16px}
   @media(max-width:900px){.cards{grid-template-columns:1fr}}
@@ -83,8 +111,53 @@
   .numbers{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:6px}
   @media(max-width:900px){.numbers{grid-template-columns:repeat(2,1fr)}}
   .num{background:#fff;border:1px solid var(--line);border-radius:12px;padding:18px}
-  .num .v{font-size:27px;font-weight:800;letter-spacing:-1px;color:var(--brand-dark)}
+  .num .v{font-size:26px;font-weight:800;letter-spacing:-1px;color:var(--brand-dark)}
   .num .l{font-size:12.8px;color:var(--ink2);margin-top:4px;line-height:1.45}
+
+  /* образец разбора */
+  .sample{display:grid;grid-template-columns:1.15fr .85fr;gap:22px;align-items:start}
+  @media(max-width:900px){.sample{grid-template-columns:1fr}}
+  .doc{border:1px solid var(--line);border-radius:16px;background:#fff;box-shadow:var(--sh);overflow:hidden}
+  .doc-head{padding:16px 20px;border-bottom:1px solid var(--line2);display:flex;justify-content:space-between;
+            align-items:flex-start;gap:12px;background:#fbfcfe}
+  .doc-head .t{font-weight:700;font-size:15px}
+  .doc-head .s{font-size:12.5px;color:var(--ink3);margin-top:3px}
+  .doc-body{padding:6px 20px 18px}
+  .drow{display:flex;justify-content:space-between;gap:14px;padding:11px 0;border-bottom:1px dashed var(--line2);font-size:13.6px}
+  .drow:last-child{border:0}
+  .drow .k{color:var(--ink3);flex:0 0 auto}
+  .drow .v{text-align:right;font-weight:600}
+  .bad-yes{color:var(--bad)}
+  .bad-no{color:var(--ok)}
+  .verdict-box{margin:14px 0 0;padding:14px 16px;border-radius:12px;background:#fff8f0;border:1px solid #f6e3c8;font-size:13.4px;line-height:1.55}
+  .verdict-box b{color:#8a5a00}
+  .aside-list{display:grid;gap:12px}
+  .aside-item{display:flex;gap:12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:#fff;font-size:13.8px;line-height:1.5;color:var(--ink2)}
+  .aside-item b{color:var(--ink);display:block;margin-bottom:3px;font-size:14px}
+  .aside-item .n{width:22px;height:22px;border-radius:50%;background:var(--brand-soft);color:var(--brand-dark);
+                 font-size:12px;font-weight:800;display:grid;place-items:center;flex:0 0 auto}
+
+  /* сравнение */
+  .cmp{width:100%;border-collapse:collapse;background:#fff;border:1px solid var(--line);border-radius:14px;overflow:hidden;font-size:14px}
+  .cmp th,.cmp td{padding:14px 16px;text-align:left;border-bottom:1px solid var(--line2);vertical-align:top}
+  .cmp thead th{background:#fbfcfe;font-size:13px;color:var(--ink2);font-weight:700}
+  .cmp thead th.us{color:var(--brand-dark);background:var(--brand-soft)}
+  .cmp td.us{background:#fbfdff;font-weight:600}
+  .cmp tr:last-child td{border-bottom:0}
+  .cmp-wrap{overflow-x:auto}
+  @media(max-width:700px){.cmp{font-size:13px}.cmp th,.cmp td{padding:11px 12px}}
+
+  /* кому подходит */
+  .fit{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  @media(max-width:900px){.fit{grid-template-columns:1fr}}
+  .fit-box{border:1px solid var(--line);border-radius:14px;padding:22px;background:#fff}
+  .fit-box.no{border-color:#f3dede;background:#fffcfc}
+  .fit-box h3{margin:0 0 14px;font-size:16px}
+  .fit-box ul{list-style:none;margin:0;padding:0;display:grid;gap:10px}
+  .fit-box li{font-size:14px;line-height:1.5;color:var(--ink2);display:flex;gap:9px}
+  .fit-box li::before{content:"—";color:var(--ink3)}
+  .fit-box.yes li::before{content:"✓";color:var(--ok);font-weight:800}
+  .fit-box.no li::before{content:"·";color:var(--bad);font-weight:800}
 
   /* pricing */
   .price-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;align-items:stretch}
@@ -102,12 +175,17 @@
   .plan li{font-size:13.4px;color:var(--ink2);display:flex;gap:8px;line-height:1.45}
   .plan li::before{content:"✓";color:var(--ok);font-weight:800}
   .plan .btn{margin-top:auto;width:100%}
+  .plan .ask{display:block;text-align:center;margin-top:10px;font-size:12.5px;color:var(--brand);font-weight:600}
   .note{font-size:12.8px;color:var(--ink3);margin-top:16px;line-height:1.55}
+  .setup{margin-top:18px;display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap;
+         border:1px dashed #c9d5e8;border-radius:14px;padding:20px 22px;background:#fbfdff}
+  .setup b{font-size:15px}
+  .setup .d{font-size:13.5px;color:var(--ink2);margin-top:4px;line-height:1.5}
 
   /* calculator */
   .calc{display:grid;grid-template-columns:1fr 1fr;gap:26px;align-items:center;background:var(--bg);
         border:1px solid var(--line);border-radius:18px;padding:28px}
-  @media(max-width:900px){.calc{grid-template-columns:1fr}}
+  @media(max-width:900px){.calc{grid-template-columns:1fr;padding:20px}}
   .calc label{display:block;font-size:13px;font-weight:600;color:var(--ink2);margin-bottom:7px}
   .calc input[type=range]{width:100%;accent-color:var(--brand)}
   .calc select,.calc input[type=number]{width:100%;padding:11px 12px;border:1px solid var(--line);
@@ -116,8 +194,9 @@
   .calc-row{display:flex;justify-content:space-between;padding:8px 0;font-size:14px;border-bottom:1px dashed var(--line2)}
   .calc-row:last-child{border:0}
   .calc-row b{font-size:15px}
-  .big{font-size:29px;font-weight:800;letter-spacing:-1.2px;color:var(--ok)}
+  .big{font-size:28px;font-weight:800;letter-spacing:-1.2px;color:var(--ok)}
   .field-row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:16px}
+  @media(max-width:520px){.field-row{grid-template-columns:1fr}}
   .range-val{font-weight:700;color:var(--ink);font-size:13px}
 
   /* faq */
@@ -131,9 +210,37 @@
   .cta{background:linear-gradient(160deg,#0f1d38,#16274a);color:#fff;border-radius:20px;padding:44px;text-align:center}
   .cta h2{color:#fff;margin-bottom:10px}
   .cta p{color:#a9bcd8;font-size:16px;margin:0 0 24px}
+  @media(max-width:640px){.cta{padding:30px 20px}}
 
   footer{border-top:1px solid var(--line2);padding:30px 0;color:var(--ink3);font-size:13px}
   .foot{display:flex;justify-content:space-between;gap:16px;flex-wrap:wrap}
+  .foot a:hover{color:var(--ink2)}
+
+  /* форма заявки */
+  .modal{position:fixed;inset:0;background:rgba(15,23,41,.55);display:none;z-index:100;
+         align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(2px)}
+  .modal.open{display:flex}
+  .sheet{background:#fff;border-radius:18px;max-width:460px;width:100%;padding:26px;position:relative;
+         box-shadow:0 40px 80px -30px rgba(15,23,41,.6);max-height:92vh;overflow:auto}
+  .sheet h3{margin:0 0 6px;font-size:20px;letter-spacing:-.4px}
+  .sheet .hint{font-size:13.5px;color:var(--ink3);margin:0 0 18px;line-height:1.5}
+  .sheet label{display:block;font-size:12.8px;font-weight:600;color:var(--ink2);margin:0 0 6px}
+  .sheet input,.sheet textarea,.sheet select{width:100%;padding:11px 12px;border:1px solid var(--line);
+        border-radius:10px;font-size:14px;font-family:inherit;margin-bottom:14px;background:#fff}
+  .sheet textarea{resize:vertical;min-height:70px}
+  .sheet .close{position:absolute;top:14px;right:14px;border:0;background:#f4f7fc;width:32px;height:32px;
+        border-radius:9px;cursor:pointer;font-size:16px;color:var(--ink2)}
+  .err{color:var(--bad);font-size:13px;margin:-4px 0 12px;display:none}
+  .okbox{display:none;text-align:center;padding:16px 0}
+  .okbox .big-ok{width:54px;height:54px;border-radius:50%;background:#e7f7ee;color:var(--ok);font-size:26px;
+        display:grid;place-items:center;margin:0 auto 14px;font-weight:800}
+
+  /* мобильная кнопка */
+  .mobile-bar{display:none;position:fixed;left:0;right:0;bottom:0;z-index:40;background:rgba(255,255,255,.96);
+        border-top:1px solid var(--line);padding:10px 14px;gap:10px;backdrop-filter:blur(8px)}
+  .mobile-bar .btn{flex:1}
+  @media(max-width:640px){.mobile-bar{display:flex}body{padding-bottom:66px}}
+  @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
 </style>
 </head>
 <body>
@@ -143,11 +250,13 @@
     <a class="logo" href="/"><span class="mark">TP</span> TenderPilot</a>
     <nav class="nav-links">
       <a href="#how">Как работает</a>
+      <a href="#sample">Пример разбора</a>
       <a href="#pricing">Тарифы</a>
       <a href="#calc">Окупаемость</a>
       <a href="#faq">Вопросы</a>
     </nav>
     <div class="nav-cta">
+      <a class="nav-contact" id="navContact" style="display:none" href="#"></a>
       <a class="btn ghost sm" href="/app">Войти</a>
       <a class="btn primary sm" href="/app#register">Попробовать бесплатно</a>
     </div>
@@ -157,18 +266,23 @@
 <div class="hero">
   <div class="wrap hero-grid">
     <div>
-      <div class="eyebrow">● Для заводов и производителей</div>
+      <div class="eyebrow">● Для заводов, производителей и поставщиков</div>
       <h1>Тендерный отдел завода,<br>который не устаёт</h1>
-      <p class="lead">TenderPilot сам собирает закупки с ЕИС и площадок, читает техническое задание,
+      <p class="lead">TenderPilot собирает закупки с ЕИС и площадок, читает техническое задание,
         сверяет требования с вашим производством и сертификатами, считает маржу и говорит прямо:
-        <b>идём или не идём</b>.</p>
+        <b>идём или не идём</b> — с обоснованием по пунктам ТЗ.</p>
       <div class="hero-actions">
         <a class="btn primary" href="/app#register">Начать бесплатно — 7 дней</a>
-        <a class="btn ghost" href="#pricing">Смотреть тарифы</a>
+        <a class="btn ghost" href="#sample">Посмотреть пример разбора</a>
       </div>
       <div class="micro">Без карты · <b>10 разборов</b> закупок бесплатно · отмена в один клик</div>
+      <div class="trust">
+        <span><i>✓</i> Данные завода не публикуются</span>
+        <span><i>✓</i> Счёт для юрлиц и ИП</span>
+        <span><i>✓</i> Ваш ключ ИИ или наш</span>
+      </div>
     </div>
-    <div class="mock">
+    <div class="mock" aria-hidden="true">
       <div class="mock-top"><span class="dotr"></span><span class="dotr"></span><span class="dotr"></span>
         <span style="margin-left:8px;font-size:12px;color:var(--ink3)">Лента закупок · обновлено 2 минуты назад</span></div>
       <div class="mock-body">
@@ -188,6 +302,7 @@
 <section id="problem">
   <div class="wrap">
     <div class="sec-head">
+      <div class="kicker">Проблема</div>
       <h2>Почему тендеры проигрывают</h2>
       <p class="sub">Не потому, что дорого. А потому что не хватает времени прочитать 80 страниц ТЗ
         и посчитать экономику до подачи.</p>
@@ -204,6 +319,7 @@
 <section id="how" style="background:var(--bg)">
   <div class="wrap">
     <div class="sec-head">
+      <div class="kicker">Как работает</div>
       <h2>Что делает система</h2>
       <p class="sub">Четыре шага от «закупка появилась» до решения с цифрами.</p>
     </div>
@@ -230,21 +346,137 @@
   </div>
 </section>
 
-<section id="pricing">
+<section id="sample">
   <div class="wrap">
     <div class="sec-head">
-      <h2>Тарифы</h2>
-      <p class="sub">Месяц или год со скидкой 17%. Пробный доступ — 7 дней, без карты.</p>
+      <div class="kicker">Результат</div>
+      <h2>Как выглядит разбор одной закупки</h2>
+      <p class="sub">Не «оценка релевантности», а решение: проходим ли по требованиям, сколько заработаем,
+        что нас отсекает. Так выглядит карточка закупки после анализа.</p>
     </div>
-    <div class="price-grid" id="pricingGrid"></div>
-    <div class="note">Оплата по счёту для юрлиц и ИП, доступ активируется в день поступления средств.
-      Нужен другой объём или внедрение под ваш завод — <a href="#cta" style="color:var(--brand)">напишите нам</a>.</div>
+    <div class="sample">
+      <div class="doc">
+        <div class="doc-head">
+          <div>
+            <div class="t">Задвижки чугунные Ду 100–300, 48 шт.</div>
+            <div class="s">44-ФЗ · НМЦК 4 850 000 ₽ · ОКПД2 28.14.13 · подача до 25.11</div>
+          </div>
+          <span class="tag mid">спорно</span>
+        </div>
+        <div class="doc-body">
+          <div class="drow"><span class="k">Проходим по требованиям</span><span class="v">7 из 9 пунктов</span></div>
+          <div class="drow"><span class="k">Сертификаты ТР ТС</span><span class="v bad-no">не хватает 1 из 3</span></div>
+          <div class="drow"><span class="k">Срок поставки / ваш цикл</span><span class="v">30 / 25 дней</span></div>
+          <div class="drow"><span class="k">Обеспечение заявки</span><span class="v">72 750 ₽</span></div>
+          <div class="drow"><span class="k">Себестоимость с логистикой</span><span class="v">4 210 000 ₽</span></div>
+          <div class="drow"><span class="k">Маржа после налогов и рисков</span><span class="v bad-no">6,4%</span></div>
+          <div class="verdict-box">
+            <b>Вердикт: спорно.</b> Маржа ниже вашего порога 12%. Из требований не закрыт
+            сертификат по п. 4.2 — можно пройти, если производитель подтвердит соответствие
+            до подачи. Закупка интересна при снижении не более 3%.
+          </div>
+        </div>
+      </div>
+      <div class="aside-list">
+        <div class="aside-item"><span class="n">1</span><div><b>Каждое требование — отдельно</b>
+          Требования к участнику, к товару, к документам и к опыту разложены по пунктам: видно,
+          на чём именно вас отсекут.</div></div>
+        <div class="aside-item"><span class="n">2</span><div><b>Экономика до подачи</b>
+          Себестоимость, логистика, гарантия, отсрочка и налоги — маржа в процентах, а не «примерно выгодно».</div></div>
+        <div class="aside-item"><span class="n">3</span><div><b>Вердикт с причиной</b>
+          «Спорно» без обоснования бесполезно. В карточке — почему и при каких условиях идти можно.</div></div>
+        <div class="aside-item"><span class="n">4</span><div><b>Профиль завода учится один раз</b>
+          Номенклатура, ОКПД2, сертификаты, мощность и порог маржи вводятся один раз — дальше
+          система считает по ним.</div></div>
+      </div>
+    </div>
   </div>
 </section>
 
-<section id="calc" style="background:var(--bg)">
+<section id="compare" style="background:var(--bg)">
   <div class="wrap">
     <div class="sec-head">
+      <div class="kicker">Сравнение</div>
+      <h2>Чем это отличается от поиска тендеров</h2>
+      <p class="sub">Агрегаторы отвечают на вопрос «где закупки». TenderPilot отвечает на вопрос
+        «стоит ли в эту лезть».</p>
+    </div>
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <thead>
+          <tr><th></th><th>Вручную</th><th>Агрегатор поиска</th><th class="us">TenderPilot</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Найти закупку по профилю</td><td>часами</td><td>да</td><td class="us">да, автоматически</td></tr>
+          <tr><td>Прочитать ТЗ и выписать требования</td><td>4–6 часов</td><td>нет</td><td class="us">минуты</td></tr>
+          <tr><td>Сверить требования с вашими сертификатами</td><td>вручную, с ошибками</td><td>нет</td><td class="us">автоматически</td></tr>
+          <tr><td>Расчёт маржи с логистикой и рисками</td><td>в Excel, если дойдут руки</td><td>нет</td><td class="us">по вашему профилю</td></tr>
+          <tr><td>Вердикт «идём / не идём» с причиной</td><td>интуиция</td><td>балл релевантности</td><td class="us">да, с обоснованием</td></tr>
+          <tr><td>Кто отвечает за данные</td><td>вы</td><td>публичный каталог</td><td class="us">закрытый контур завода</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+
+<section id="fit">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Честно</div>
+      <h2>Кому подходит, а кому нет</h2>
+      <p class="sub">Мы не продаём всем. Если ваш случай из правой колонки — скажем это сразу,
+        а не после оплаты.</p>
+    </div>
+    <div class="fit">
+      <div class="fit-box yes">
+        <h3>Подойдёт, если вы</h3>
+        <ul>
+          <li>производите или поставляете оборудование, арматуру, металл, насосы, конструкции;</li>
+          <li>участвуете или хотите участвовать в закупках 44-ФЗ / 223-ФЗ и у коммерческих заказчиков;</li>
+          <li>рассматриваете от 5 тендеров в месяц — иначе разбор просто не окупится;</li>
+          <li>теряли время на закупках, где заведомо не проходили по требованиям;</li>
+          <li>хотите видеть цифры маржи до подачи, а не после подписания.</li>
+        </ul>
+      </div>
+      <div class="fit-box no">
+        <h3>Не подойдёт, если вы</h3>
+        <ul>
+          <li>ищете просто базу тендеров подешевле — вам нужен агрегатор, а не разбор;</li>
+          <li>участвуете в 1–2 закупках в год — проще разобрать вручную;</li>
+          <li>работаете только по прямым договорам без конкурентных процедур;</li>
+          <li>ждёте, что система сама подаст заявку и подпишет контракт — подача остаётся на вас;</li>
+          <li>нужна гарантия победы: её не даёт ни один сервис, включая нас.</li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="pricing" style="background:var(--bg)">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Тарифы</div>
+      <h2>Прозрачные цены без «звоните — обсудим»</h2>
+      <p class="sub">Месяц или год со скидкой 17%. Пробный доступ — 7 дней и 10 разборов, без карты.</p>
+    </div>
+    <div class="price-grid" id="pricingGrid"></div>
+    <div class="setup">
+      <div>
+        <b>Внедрение под ключ — 49 000 ₽ разово</b>
+        <div class="d">Заполним профиль завода, подключим площадки и Telegram, настроим порог маржи
+          и проведём первый разбор вместе с вашим специалистом. Обычно один рабочий день.</div>
+      </div>
+      <button class="btn ghost" data-ask="Внедрение под ключ">Обсудить внедрение</button>
+    </div>
+    <div class="note">Оплата по счёту для юрлиц и ИП, доступ активируется в день поступления средств.
+      Договор, счёт и закрывающие документы — по запросу. Нужен другой объём — <a href="#cta" style="color:var(--brand)">напишите нам</a>.</div>
+  </div>
+</section>
+
+<section id="calc">
+  <div class="wrap">
+    <div class="sec-head">
+      <div class="kicker">Экономика</div>
       <h2>Посчитайте окупаемость</h2>
       <p class="sub">Сравните стоимость подписки с тем, что вы платите за поиск и разбор закупок сейчас.</p>
     </div>
@@ -252,26 +484,26 @@
       <div>
         <div class="field-row">
           <div>
-            <label>Специалист в месяц, ₽</label>
+            <label for="salary">Специалист в месяц, ₽</label>
             <input type="number" id="salary" value="80000" min="0" step="5000">
           </div>
           <div>
-            <label>Человек в тендерном отделе</label>
+            <label for="people">Человек в тендерном отделе</label>
             <input type="number" id="people" value="1" min="1" max="20">
           </div>
         </div>
         <div class="field-row">
           <div>
-            <label>Закупок просматривают в месяц</label>
+            <label for="volume">Закупок просматривают в месяц</label>
             <input type="number" id="volume" value="40" min="1" max="2000">
           </div>
           <div>
-            <label>Тариф</label>
+            <label for="planSel">Тариф</label>
             <select id="planSel"></select>
           </div>
         </div>
         <div>
-          <label>Доля времени, которую забирает рутина <span class="range-val" id="shareVal">40%</span></label>
+          <label for="share">Доля времени, которую забирает рутина <span class="range-val" id="shareVal">40%</span></label>
           <input type="range" id="share" min="10" max="80" value="40" step="5">
         </div>
       </div>
@@ -286,36 +518,48 @@
   </div>
 </section>
 
-<section id="faq">
+<section id="faq" style="background:var(--bg)">
   <div class="wrap" style="max-width:840px">
-    <div class="sec-head"><h2>Вопросы</h2></div>
+    <div class="sec-head"><div class="kicker">Вопросы</div><h2>Частые вопросы</h2></div>
     <details open><summary>Нужно ли что-то устанавливать?</summary>
       <p>Нет. Работает в браузере, данные и доступ — в вашем аккаунте. Для крупных клиентов
          возможна установка на собственный сервер компании.</p></details>
     <details><summary>Откуда берутся закупки?</summary>
       <p>Официальный ЕИС (44-ФЗ и 223-ФЗ), выгрузки и API электронных площадок, XML-извещения.
          Если у вас есть договор с площадкой, подключаем её API по токену.</p></details>
+    <details><summary>Какой ИИ используется и куда уходят данные?</summary>
+      <p>Подключается языковая модель по вашему ключу API или по нашему — по выбору. Текст ТЗ
+         отправляется только в выбранную вами модель; другим клиентам данные не передаются.
+         Для закрытых закупок возможен режим без внешней модели.</p></details>
     <details><summary>ИИ ошибается — кто отвечает за решение?</summary>
       <p>Решение всегда за вами. Система показывает, на каком пункте ТЗ основан вывод, какие требования
          не закрыты и какие цифры по марже. Это инструмент подготовки решения, а не замена специалисту.</p></details>
     <details><summary>Насколько безопасны данные завода?</summary>
-      <p>Данные хранятся в вашем аккаунте и не передаются другим пользователям. У каждого сотрудника
-         отдельный доступ и роль. Для работы с закрытыми ТЗ подписываем NDA.</p></details>
-    <details><summary>Можно оплатить по счёту?</summary>
-      <p>Да, для юрлиц и ИП: выставляем счёт, доступ активируется в день поступления оплаты.
-         Оплата картой подключается по запросу.</p></details>
+      <p>Данные хранятся в вашем аккаунте и не передаются другим пользователям — это закрытый контур,
+         а не публичный каталог. У каждого сотрудника отдельный доступ и роль. Для работы с закрытыми
+         ТЗ подписываем NDA.</p></details>
+    <details><summary>Можно оплатить по счёту или нужна карта?</summary>
+      <p>Для юрлиц и ИП выставляем счёт — это основной способ оплаты, доступ активируется
+         в день поступления денег. Оплата картой подключается по запросу.</p></details>
     <details><summary>Что будет, если не подойдёт?</summary>
-      <p>7 дней бесплатно без карты. Дальше — помесячная оплата, можно отказаться в любой момент,
-         деньги за неиспользованный год возвращаем пропорционально.</p></details>
+      <p>7 дней и 10 разборов бесплатно без карты. Дальше — помесячная оплата, можно отказаться
+         в любой момент, деньги за неиспользованный год возвращаем пропорционально.</p></details>
+    <details><summary>Сколько занимает запуск?</summary>
+      <p>Самостоятельно — 10–15 минут: профиль завода, номенклатура, сертификаты, ключ ИИ.
+         С внедрением под ключ — один рабочий день, профиль заполняем вместе с вами.</p></details>
   </div>
 </section>
 
 <section id="cta">
   <div class="wrap">
     <div class="cta">
-      <h2>Разберём пять ваших закупок бесплатно</h2>
-      <p>Покажем на реальных тендерах вашего завода, где вы проходите, а где нет — и сколько на этом можно заработать.</p>
-      <a class="btn primary" href="/app#register" style="font-size:16px;padding:15px 28px">Создать аккаунт</a>
+      <h2>Разберём ваши закупки бесплатно</h2>
+      <p>Оставьте контакт — вернёмся с разбором одной вашей закупки и покажем, где вы проходите,
+        а где нет. Либо создайте аккаунт и сделайте это сами за 15 минут.</p>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;justify-content:center">
+        <a class="btn primary" href="/app#register" style="font-size:16px;padding:15px 28px">Создать аккаунт</a>
+        <button class="btn" data-ask="Разбор моей закупки" style="font-size:16px;padding:15px 28px;background:#fff;color:#0f1729">Получить разбор</button>
+      </div>
       <div class="micro" style="color:#8fa6c8;margin-top:14px">7 дней бесплатно · 10 разборов · без карты</div>
     </div>
   </div>
@@ -324,29 +568,95 @@
 <footer>
   <div class="wrap foot">
     <div>© <span id="yr"></span> TenderPilot — сервис для производителей и поставщиков</div>
-    <div style="display:flex;gap:18px">
+    <div style="display:flex;gap:18px;flex-wrap:wrap">
       <a href="#pricing">Тарифы</a><a href="#faq">Вопросы</a><a href="/app">Вход</a>
+      <a href="/legal">Оферта и документы</a>
+      <span id="footContact"></span>
     </div>
   </div>
 </footer>
+
+<div class="mobile-bar">
+  <a class="btn ghost sm" href="/app">Войти</a>
+  <a class="btn primary sm" href="/app#register">7 дней бесплатно</a>
+</div>
+
+<div class="modal" id="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+  <div class="sheet">
+    <button class="close" id="modalClose" aria-label="Закрыть">✕</button>
+    <div id="formWrap">
+      <h3 id="modalTitle">Разбор вашей закупки</h3>
+      <p class="hint" id="modalHint">Оставьте контакт — вернёмся в рабочее время, разберём одно ТЗ и покажем,
+        подходите ли вы по требованиям.</p>
+      <form id="leadForm" novalidate>
+        <label for="fName">Как к вам обращаться *</label>
+        <input id="fName" name="name" required autocomplete="name" placeholder="Иван">
+        <label for="fCompany">Компания</label>
+        <input id="fCompany" name="company" autocomplete="organization" placeholder="ООО «Арматура»">
+        <label for="fContact">Телефон, e-mail или Telegram *</label>
+        <input id="fContact" name="contact" required placeholder="+7 900 000-00-00 или @username">
+        <label for="fComment">Что нужно</label>
+        <textarea id="fComment" name="comment" placeholder="Например: разберите ТЗ на задвижки, 80 страниц, подача 25 ноября"></textarea>
+        <div class="err" id="formErr"></div>
+        <button class="btn primary block" type="submit" id="formSubmit">Отправить заявку</button>
+        <div class="micro" style="margin-top:10px;text-align:center">Нажимая кнопку, вы соглашаетесь на обработку
+          контактных данных для ответа на заявку.</div>
+      </form>
+    </div>
+    <div class="okbox" id="okBox">
+      <div class="big-ok">✓</div>
+      <h3>Заявка отправлена</h3>
+      <p class="hint" style="margin-bottom:18px">Свяжемся в рабочее время. Если нужно быстрее — создайте аккаунт
+        и начните разбор прямо сейчас, это займёт 15 минут.</p>
+      <a class="btn primary block" href="/app#register">Создать аккаунт</a>
+    </div>
+  </div>
+</div>
 
 <script>
 document.getElementById('yr').textContent = new Date().getFullYear();
 const money = (n) => new Intl.NumberFormat('ru-RU', { maximumFractionDigits: 0 }).format(Math.round(n)) + ' ₽';
 
 let PLANS = [];
-fetch('/api/plans').then((r) => r.json()).then((d) => { PLANS = d.plans || []; renderPlans(); renderCalcPlans(); }).catch(() => {
-  renderPlans(true);
-});
+fetch('/api/plans').then((r) => r.json()).then((d) => {
+  PLANS = d.plans || [];
+  renderPlans();
+  renderCalcPlans();
+  renderContacts(d.contact || {});
+}).catch(() => { renderPlans(); renderCalcPlans(); });
 
-function renderPlans(fallback) {
+function renderContacts(c) {
+  const phone = (c.phone || '').trim();
+  const email = (c.email || '').trim();
+  const tg = (c.telegram || '').trim();
+  const links = [];
+  if (phone) links.push(`<a href="tel:${phone.replace(/[^+\d]/g, '')}">${phone}</a>`);
+  if (email) links.push(`<a href="mailto:${email}">${email}</a>`);
+  if (tg) {
+    const href = tg.startsWith('http') ? tg : 'https://t.me/' + tg.replace(/^@/, '');
+    links.push(`<a href="${href}" target="_blank" rel="noopener">Telegram</a>`);
+  }
+  if (!links.length) return;
+  const nav = document.getElementById('navContact');
+  nav.style.display = '';
+  nav.href = phone ? 'tel:' + phone.replace(/[^+\d]/g, '') : (email ? 'mailto:' + email : (tg.startsWith('http') ? tg : 'https://t.me/' + tg.replace(/^@/, '')));
+  nav.textContent = phone || email || 'Написать в Telegram';
+  document.getElementById('footContact').innerHTML = links.join(' · ');
+}
+
+function planList() {
+  const fallback = [
+    { id: 'solo', name: 'Соло', price_month: 6900, price_year: 69000, features: ['30 разборов закупок в месяц', '1 пользователь', 'ЕИС 44-ФЗ и 223-ФЗ'] },
+    { id: 'factory', name: 'Завод', price_month: 14900, price_year: 149000, popular: true, features: ['150 разборов закупок в месяц', '3 пользователя', 'проверка каждого требования ТЗ'] },
+    { id: 'department', name: 'Отдел', price_month: 29900, price_year: 299000, features: ['600 разборов закупок в месяц', 'до 15 пользователей', 'журнал действий и роли'] },
+  ];
+  const list = (PLANS.length ? PLANS : fallback).filter((p) => p.id !== 'trial' && p.id !== 'setup');
+  return list.length ? list : fallback;
+}
+
+function renderPlans() {
   const grid = document.getElementById('pricingGrid');
-  const list = (PLANS.length ? PLANS : [
-    { id: 'solo', name: 'Соло', price_month: 6900, price_year: 69000, features: ['30 разборов', '1 пользователь'] },
-    { id: 'factory', name: 'Завод', price_month: 14900, price_year: 149000, popular: true, features: ['150 разборов', '3 пользователя'] },
-    { id: 'department', name: 'Отдел', price_month: 29900, price_year: 299000, features: ['600 разборов', '15 пользователей'] },
-  ]).filter((p) => p.id !== 'trial' && p.id !== 'setup');
-  grid.innerHTML = list.map((p) => `
+  grid.innerHTML = planList().map((p) => `
     <div class="plan ${p.popular ? 'pop' : ''}">
       ${p.popular ? '<div class="pop-badge">Выбирают чаще</div>' : ''}
       <h3>${p.name}</h3>
@@ -355,6 +665,7 @@ function renderPlans(fallback) {
       <div class="yearly">${p.price_year ? 'или ' + money(p.price_year) + ' в год — экономия 17%' : ''}</div>
       <ul>${(p.features || []).map((f) => `<li>${f}</li>`).join('')}</ul>
       <a class="btn ${p.popular ? 'primary' : 'ghost'}" href="/app#register">Начать бесплатно</a>
+      <a class="ask" href="#cta" data-ask="${p.name}">или запросить счёт</a>
     </div>`).join('');
 }
 
@@ -386,8 +697,69 @@ function calc() {
     : 'При таком объёме подписка не окупается — начните с пробного доступа.';
 }
 ['salary', 'people', 'share', 'planSel'].forEach((id) => {
-  document.getElementById(id)?.addEventListener('input', calc);
-  document.getElementById(id)?.addEventListener('change', calc);
+  const el = document.getElementById(id);
+  if (el) { el.addEventListener('input', calc); el.addEventListener('change', calc); }
+});
+
+/* ---- форма заявки ---- */
+const modal = document.getElementById('modal');
+const planInput = document.createElement('input');
+planInput.type = 'hidden';
+planInput.name = 'plan';
+planInput.id = 'fPlan';
+document.getElementById('leadForm').appendChild(planInput);
+
+function openModal(topic) {
+  document.getElementById('formWrap').style.display = '';
+  document.getElementById('okBox').style.display = 'none';
+  document.getElementById('formErr').style.display = 'none';
+  const hint = document.getElementById('modalHint');
+  document.getElementById('modalTitle').textContent = topic ? 'Заявка: ' + topic : 'Разбор вашей закупки';
+  hint.textContent = topic === 'Связаться'
+    ? 'Напишите, как с вами связаться — ответим в рабочее время.'
+    : 'Оставьте контакт — вернёмся в рабочее время, разберём одно ТЗ и покажем, подходите ли вы по требованиям.';
+  document.getElementById('fPlan').value = topic && topic !== 'Связаться' && topic !== 'Разбор моей закупки' ? topic : '';
+  modal.classList.add('open');
+  setTimeout(() => document.getElementById('fName').focus(), 60);
+}
+function closeModal() { modal.classList.remove('open'); }
+
+document.addEventListener('click', (e) => {
+  const ask = e.target.closest('[data-ask]');
+  if (ask) { e.preventDefault(); openModal(ask.dataset.ask); }
+});
+document.getElementById('modalClose').addEventListener('click', closeModal);
+modal.addEventListener('click', (e) => { if (e.target === modal) closeModal(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeModal(); });
+
+document.getElementById('leadForm').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const err = document.getElementById('formErr');
+  const btn = document.getElementById('formSubmit');
+  const payload = {
+    name: document.getElementById('fName').value.trim(),
+    company: document.getElementById('fCompany').value.trim(),
+    contact: document.getElementById('fContact').value.trim(),
+    comment: document.getElementById('fComment').value.trim(),
+    plan: document.getElementById('fPlan').value,
+    source: location.hash === '#cta' ? 'landing-cta' : 'landing',
+  };
+  if (payload.name.length < 2) { err.textContent = 'Укажите, как к вам обращаться'; err.style.display = 'block'; return; }
+  if (payload.contact.length < 5) { err.textContent = 'Оставьте телефон, e-mail или Telegram'; err.style.display = 'block'; return; }
+  err.style.display = 'none';
+  btn.disabled = true; btn.textContent = 'Отправляем…';
+  try {
+    const r = await fetch('/api/lead', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(d.detail || 'Не удалось отправить заявку');
+    document.getElementById('formWrap').style.display = 'none';
+    document.getElementById('okBox').style.display = 'block';
+  } catch (ex) {
+    err.textContent = ex.message || 'Ошибка сети. Попробуйте ещё раз.';
+    err.style.display = 'block';
+  } finally {
+    btn.disabled = false; btn.textContent = 'Отправить заявку';
+  }
 });
 </script>
 </body>

@@ -421,6 +421,9 @@ def init_db(reset=False):
     conn = connect()
     conn.executescript(SCHEMA)
     migrate(conn)
+    from . import leads as _leads
+    _leads.add_leads_table(conn)
+    conn.commit()
     cur = conn.execute("SELECT COUNT(*) AS c FROM users")
     if cur.fetchone()["c"] == 0:
         conn.execute(
