@@ -790,16 +790,18 @@ async def sources_check(user=Depends(current_user)):
         "Росатом": "https://zakupki.rosatom.ru",
         "Сбер А": "https://www.sberbank-ast.ru",
     }
-    out = []
-    async with _httpx.AsyncClient(timeout=12, follow_redirects=True,
+    import asyncio as _asyncio
+
+    async with _httpx.AsyncClient(timeout=_httpx.Timeout(6.0, connect=4.0), follow_redirects=True,
                                   headers={"User-Agent": src_mod.UA}) as client:
-        for name, url in targets.items():
+        async def probe(name, url):
             try:
                 r = await client.get(url)
-                ok = r.status_code < 400
-                out.append({"name": name, "url": url, "status": r.status_code, "ok": ok})
+                return {"name": name, "url": url, "status": r.status_code, "ok": r.status_code < 400}
             except Exception as e:
-                out.append({"name": name, "url": url, "status": None, "ok": False, "error": str(e)[:120]})
+                return {"name": name, "url": url, "status": None, "ok": False, "error": str(e)[:120]}
+
+        out = list(await _asyncio.gather(*[probe(n, u) for n, u in targets.items()]))
     return {"results": out}
 
 
