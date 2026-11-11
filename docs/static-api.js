@@ -372,7 +372,7 @@
   }
 
   /* ---------- роутер вместо сервера ---------- */
-  const DEMO_USER = { id: 1, email: 'owner@zavod.ru', name: 'Владелец завода' };
+  const DEMO_USER = { id: 1, email: 'owner@zavod.ru', name: 'Владелец завода', role: 'manager', status: 'active' };
   const AI_SETTINGS = {
     provider: 'openai', base_url: 'https://api.openai.com/v1', model: 'gpt-4o-mini',
     api_key_set: false, api_key_hint: '', temperature: 0.2, auto_analyze: true, match_threshold: 55,
@@ -392,6 +392,10 @@
       return { ok: true, user: DEMO_USER, token: 'demo' };
     }
     if (path === '/logout') { write(LS.auth, false); return { ok: true }; }
+    if (path === '/register') {
+      const e = new Error('Статическая демо-версия без сервера: регистрация и панель администратора недоступны. Запустите приложение через start.bat.');
+      e.status = 400; throw e;
+    }
 
     needAuth();
 

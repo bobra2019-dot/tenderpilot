@@ -15,14 +15,8 @@ def ensure_dirs():
     os.makedirs(PROCESSED, exist_ok=True)
 
 
-def get_sources(conn):
-    row = conn.execute("SELECT value FROM settings WHERE key='sources'").fetchone()
-    current = {}
-    if row:
-        try:
-            current = json.loads(row["value"]) or {}
-        except Exception:
-            current = {}
+def get_sources(conn, uid=None):
+    current = db.get_setting(conn, "sources", uid, default=None) or {}
     out = []
     for default in sources.DEFAULT_SOURCES:
         saved = current.get(default["id"], {})
@@ -42,40 +36,40 @@ def get_sources(conn):
     return out
 
 
-def save_sources(conn, items):
+def save_sources(conn, items, uid=None):
     payload = {s["id"]: {"enabled": bool(s.get("enabled")), "type": s.get("type"),
                          "name": s.get("name"), "note": s.get("note"),
                          "params": s.get("params") or {}} for s in items}
-    conn.execute("INSERT INTO settings (key, value) VALUES ('sources', ?) "
-                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                 (json.dumps(payload, ensure_ascii=False),))
-    conn.commit()
+    db.set_setting(conn, "sources", payload, uid)
     return payload
 
 
-def log(conn, source_id, status, message, found=0, added=0):
+def log(conn, source_id, status, message, found=0, added=0, uid=None):
     conn.execute(
-        "INSERT INTO ingest_log (created_at, source_id, status, message, found, added) VALUES (?,?,?,?,?,?)",
-        (db.now_iso(), source_id, status, message[:500], found, added),
+        "INSERT INTO ingest_log (user_id, created_at, source_id, status, message, found, added) "
+        "VALUES (?,?,?,?,?,?,?)",
+        (db._uid(conn, uid), db.now_iso(), source_id, status, message[:500], found, added),
     )
     conn.commit()
 
 
-def save_tender(conn, t) -> bool:
-    """Вставляет закупку, если её ещё нет. True — добавлена новая."""
+def save_tender(conn, t, uid=None) -> bool:
+    """Вставляет закупку в ленту пользователя, если её ещё нет. True — добавлена новая."""
+    uid = db._uid(conn, uid)
     exists = conn.execute(
-        "SELECT id FROM tenders WHERE ext_id=? AND platform=?", (t.get("ext_id"), t.get("platform"))
+        "SELECT id FROM tenders WHERE user_id=? AND ext_id=? AND platform=?",
+        (uid, t.get("ext_id"), t.get("platform")),
     ).fetchone()
     if exists:
         return False
     conn.execute(
-        """INSERT INTO tenders (ext_id, platform, law, category, title, customer, customer_inn, region, okpd,
+        """INSERT INTO tenders (user_id, ext_id, platform, law, category, title, customer, customer_inn, region, okpd,
            qty, unit, sum, published, deadline, delivery_days, payment_terms, bid_security_pct,
            contract_security_pct, penalty, description, tz_text, requirements, files, source_url,
            ingested, stage, manual, created_at)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'new',0,?)""",
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,1,'new',0,?)""",
         (
-            str(t.get("ext_id") or "")[:64], t.get("platform") or "manual", t.get("law") or "коммерч.",
+            uid, str(t.get("ext_id") or "")[:64], t.get("platform") or "manual", t.get("law") or "коммерч.",
             t.get("category") or "valves", (t.get("title") or "")[:300], (t.get("customer") or "Не определён")[:200],
             "", (t.get("region") or "")[:80], (t.get("okpd") or "")[:32],
             float(t.get("qty") or 1), (t.get("unit") or "компл")[:16], float(t.get("sum") or 0),
@@ -90,7 +84,7 @@ def save_tender(conn, t) -> bool:
     return True
 
 
-async def run_source(conn, source, cfg=None) -> dict:
+async def run_source(conn, source, cfg=None, uid=None) -> dict:
     """Выполняет один источник и сохраняет найденное."""
     sid, stype = source["id"], source["type"]
     params = source.get("params") or {}
@@ -116,31 +110,33 @@ async def run_source(conn, source, cfg=None) -> dict:
         result["found"] = len(items)
         added = 0
         for t in items:
-            if save_tender(conn, t):
+            if save_tender(conn, t, uid):
                 added += 1
         conn.commit()
         result["added"] = added
-        log(conn, sid, "ok", f"найдено {len(items)}, новых {added}", len(items), added)
+        log(conn, sid, "ok", f"найдено {len(items)}, новых {added}", len(items), added, uid)
     except Exception as e:
         result["errors"].append(str(e))
-        log(conn, sid, "error", str(e), 0, 0)
+        log(conn, sid, "error", str(e), 0, 0, uid)
     return result
 
 
-async def run_all(conn, only_ids=None) -> list:
-    srcs = [s for s in get_sources(conn) if s.get("enabled")]
+async def run_all(conn, only_ids=None, uid=None) -> list:
+    all_srcs = get_sources(conn, uid)
+    srcs = [s for s in all_srcs if s.get("enabled")]
     if only_ids:
-        srcs = [s for s in get_sources(conn) if s["id"] in only_ids]
+        srcs = [s for s in all_srcs if s["id"] in only_ids]
     out = []
     for s in srcs:
-        out.append(await run_source(conn, s))
+        out.append(await run_source(conn, s, uid=uid))
     return out
 
 
-def auto_analyze_new(conn, company, cfg) -> int:
-    """Анализирует новые закупки, у которых ещё нет заключения (без LLM — быстро, для отсева)."""
+def auto_analyze_new(conn, company, cfg, uid=None) -> int:
+    """Анализирует новые закупки пользователя, у которых ещё нет заключения (без LLM — быстро, для отсева)."""
     from . import ai
-    rows = conn.execute("SELECT * FROM tenders WHERE analysis IS NULL ORDER BY id DESC LIMIT 40").fetchall()
+    rows = conn.execute("SELECT * FROM tenders WHERE user_id=? AND analysis IS NULL ORDER BY id DESC LIMIT 40",
+                        (db._uid(conn, uid),)).fetchall()
     done = 0
     threshold = float(cfg.get("match_threshold") or 0)
     for row in rows:

@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 """Уведомления: Telegram и e-mail (SMTP). Настройки — в settings ключ 'notify'."""
 import json
+
+from . import db
 import smtplib
 from email.mime.text import MIMEText
 
@@ -15,33 +17,26 @@ DEFAULT_NOTIFY = {
 }
 
 
-def get_notify(conn, mask=True):
-    row = conn.execute("SELECT value FROM settings WHERE key='notify'").fetchone()
+def _read(conn, uid=None):
     cfg = dict(DEFAULT_NOTIFY)
-    if row:
-        try:
-            cfg.update(json.loads(row["value"]) or {})
-        except Exception:
-            pass
-    if mask:
-        cfg = json.loads(json.dumps(cfg))
-        for k in ("telegram_token",):
-            v = cfg.get(k) or ""
-            cfg[k] = (v[:6] + "…") if len(v) > 10 else ("задан" if v else "")
-        cfg["telegram_token_set"] = bool((json.loads(row["value"]).get("telegram_token") if row else ""))
-        cfg["telegram_chat_hint"] = (json.loads(row["value"]).get("telegram_chat") if row else "") or ""
-        cfg["telegram_chat"] = cfg["telegram_chat_hint"]
+    saved = db.get_setting(conn, "notify", uid, default=None) or {}
+    cfg.update(saved or {})
     return cfg
 
 
-def set_notify(conn, patch):
-    row = conn.execute("SELECT value FROM settings WHERE key='notify'").fetchone()
-    cfg = dict(DEFAULT_NOTIFY)
-    if row:
-        try:
-            cfg.update(json.loads(row["value"]) or {})
-        except Exception:
-            pass
+def get_notify(conn, mask=True, uid=None):
+    cfg = _read(conn, uid)
+    if mask:
+        cfg = json.loads(json.dumps(cfg))
+        token = cfg.get("telegram_token") or ""
+        cfg["telegram_token_set"] = bool(token)
+        cfg["telegram_token"] = (token[:6] + "…") if len(token) > 10 else ("задан" if token else "")
+        cfg["telegram_chat_hint"] = cfg.get("telegram_chat") or ""
+    return cfg
+
+
+def set_notify(conn, patch, uid=None):
+    cfg = _read(conn, uid)
     for k, v in (patch or {}).items():
         if k in ("telegram_token", "telegram_chat") and (v is None or str(v).strip() == ""):
             continue
@@ -49,10 +44,7 @@ def set_notify(conn, patch):
             cfg["email"].update(v)
         else:
             cfg[k] = v
-    conn.execute("INSERT INTO settings (key, value) VALUES ('notify', ?) "
-                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                 (json.dumps(cfg, ensure_ascii=False),))
-    conn.commit()
+    db.set_setting(conn, "notify", cfg, uid)
     return cfg
 
 

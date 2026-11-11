@@ -49,18 +49,97 @@ def current_user(request: Request):
         conn.close()
     if not user:
         raise HTTPException(status_code=401, detail="Требуется вход")
+    if user.get("status") == "blocked":
+        raise HTTPException(status_code=403, detail="Доступ закрыт администратором")
+    if user.get("status") == "pending":
+        raise HTTPException(status_code=403, detail="Регистрация ожидает подтверждения администратора")
     return user
+
+
+def editor_user(user=Depends(current_user)):
+    """Право изменять данные: наблюдателю запрещено."""
+    if user.get("role") == "viewer":
+        raise HTTPException(status_code=403, detail="Роль «Наблюдатель»: доступен только просмотр")
+    return user
+
+
+def admin_user(user=Depends(current_user)):
+    if user.get("role") != "owner":
+        raise HTTPException(status_code=403, detail="Раздел доступен только администратору")
+    return user
+
+
+class RegisterIn(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    company_name: str = ""
+
+
+@app.get("/api/registration")
+def registration_info():
+    """Публично: открыта ли регистрация и нужно ли подтверждение."""
+    conn = db.connect()
+    try:
+        cfg = db.registration_settings(conn)
+    finally:
+        conn.close()
+    return {"open": bool(cfg.get("open")), "require_approval": bool(cfg.get("require_approval"))}
+
+
+@app.post("/api/register")
+def register(data: RegisterIn):
+    email = (data.email or "").strip().lower()
+    if "@" not in email or len(email) < 5:
+        raise HTTPException(400, "Укажите корректный e-mail")
+    if len(data.password or "") < 6:
+        raise HTTPException(400, "Пароль должен быть не короче 6 символов")
+    conn = db.connect()
+    try:
+        cfg = db.registration_settings(conn)
+        if not cfg.get("open"):
+            raise HTTPException(403, "Регистрация закрыта. Запросите доступ у администратора.")
+        if db.user_by_email(conn, email):
+            raise HTTPException(409, "Пользователь с таким e-mail уже зарегистрирован")
+        status = "pending" if cfg.get("require_approval") else "active"
+        user = db.create_user(conn, email, data.password, data.name or email.split("@")[0],
+                              role=cfg.get("default_role") or "manager", status=status,
+                              company_name=data.company_name or "")
+        # каждому пользователю — свой профиль завода и настройки
+        seed_company = json.loads(json.dumps(db.DEFAULT_COMPANY, ensure_ascii=False))
+        seed_company.update(json.loads(json.dumps(db.DEMO_COMPANY, ensure_ascii=False)))
+        if data.company_name:
+            seed_company["name"] = data.company_name
+        conn.execute("INSERT OR REPLACE INTO company (user_id, data) VALUES (?,?)",
+                     (user["id"], json.dumps(seed_company, ensure_ascii=False)))
+        conn.execute("INSERT OR REPLACE INTO settings (user_id, key, value) VALUES (?, 'ai', ?)",
+                     (user["id"], json.dumps(db.DEFAULT_AI_SETTINGS, ensure_ascii=False)))
+        conn.commit()
+    finally:
+        conn.close()
+    if status == "pending":
+        return {"ok": True, "status": "pending",
+                "message": "Заявка принята. Доступ откроется после подтверждения администратором."}
+    return {"ok": True, "status": "active", "message": "Регистрация завершена — можно входить."}
 
 
 @app.post("/api/login")
 def login(data: LoginIn, response: Response):
     conn = db.connect()
     try:
-        row = conn.execute("SELECT * FROM users WHERE email=?", (data.email.strip().lower(),)).fetchone()
+        row = db.user_by_email(conn, data.email)
         if not row or row["pass_hash"] != db.hash_pass(data.password):
             raise HTTPException(status_code=401, detail="Неверный email или пароль")
+        if row["status"] == "blocked":
+            raise HTTPException(status_code=403, detail="Доступ закрыт администратором")
+        if row["status"] == "pending":
+            raise HTTPException(status_code=403,
+                                detail="Заявка на регистрацию ещё не подтверждена администратором")
+        conn.execute("UPDATE users SET last_login_at=? WHERE id=?", (db.now_iso(), row["id"]))
+        conn.commit()
         token = db.create_session(conn, row["id"])
-        user = {"id": row["id"], "email": row["email"], "name": row["name"]}
+        user = {"id": row["id"], "email": row["email"], "name": row["name"],
+                "role": row["role"], "status": row["status"]}
     finally:
         conn.close()
     response.set_cookie("tp_session", token, httponly=True, samesite="lax", max_age=60 * 60 * 24 * 14)
@@ -83,7 +162,8 @@ def logout(request: Request, response: Response):
 
 @app.get("/api/me")
 def me(user=Depends(current_user)):
-    return {"user": {k: user[k] for k in ("id", "email", "name")}}
+    return {"user": {k: user.get(k) for k in ("id", "email", "name", "role", "status", "company_name")},
+            "roles": db.ROLES}
 
 
 # ---------------- справочники и профиль ----------------
@@ -96,23 +176,23 @@ def catalog(user=Depends(current_user)):
 def get_company(user=Depends(current_user)):
     conn = db.connect()
     try:
-        return {"company": db.get_company(conn)}
+        return {"company": db.get_company(conn, user["id"])}
     finally:
         conn.close()
 
 
 @app.put("/api/company")
-def put_company(payload: dict, user=Depends(current_user)):
+def put_company(payload: dict, user=Depends(editor_user)):
     conn = db.connect()
     try:
-        cur = db.get_company(conn)
+        cur = db.get_company(conn, user["id"])
         for k, v in (payload or {}).items():
             if k in ("economics", "scoring") and isinstance(v, dict):
                 cur.setdefault(k, {})
                 cur[k].update(v)
             else:
                 cur[k] = v
-        db.set_company(conn, cur)
+        db.set_company(conn, cur, user["id"])
         return {"ok": True, "company": cur}
     finally:
         conn.close()
@@ -123,26 +203,26 @@ def put_company(payload: dict, user=Depends(current_user)):
 def ai_settings(user=Depends(current_user)):
     conn = db.connect()
     try:
-        return {"settings": db.get_ai_settings(conn), "presets": db.PROVIDER_PRESETS}
+        return {"settings": db.get_ai_settings(conn, uid=user["id"]), "presets": db.PROVIDER_PRESETS}
     finally:
         conn.close()
 
 
 @app.put("/api/ai/settings")
-def ai_settings_put(payload: dict, user=Depends(current_user)):
+def ai_settings_put(payload: dict, user=Depends(editor_user)):
     conn = db.connect()
     try:
-        db.set_ai_settings(conn, payload or {})
-        return {"ok": True, "settings": db.get_ai_settings(conn)}
+        db.set_ai_settings(conn, payload or {}, user["id"])
+        return {"ok": True, "settings": db.get_ai_settings(conn, uid=user["id"])}
     finally:
         conn.close()
 
 
 @app.post("/api/ai/test")
-async def ai_test(user=Depends(current_user)):
+async def ai_test(user=Depends(editor_user)):
     conn = db.connect()
     try:
-        cfg = db.get_ai_settings(conn, mask=False)
+        cfg = db.get_ai_settings(conn, mask=False, uid=user["id"])
     finally:
         conn.close()
     preset = db.PROVIDER_PRESETS.get(cfg.get("provider", ""), {})
@@ -157,7 +237,7 @@ async def ai_test(user=Depends(current_user)):
 # ---------------- сериализация тендеров ----------------
 def row_to_tender(conn, row, company=None):
     t = dict(row)
-    company = company or db.get_company(conn)
+    company = company or db.get_company(conn, db._uid(conn))
     try:
         t["requirements"] = json.loads(t.get("requirements") or "[]")
     except Exception:
@@ -189,8 +269,8 @@ def list_tenders(user=Depends(current_user), q: str = "", stage: str = "", platf
                 limit: int = 200, ingested: str = ""):
     conn = db.connect()
     try:
-        company = db.get_company(conn)
-        rows = conn.execute("SELECT * FROM tenders ORDER BY id").fetchall()
+        company = db.get_company(conn, user["id"])
+        rows = conn.execute("SELECT * FROM tenders WHERE user_id=? ORDER BY id", (user["id"],)).fetchall()
         items = [row_to_tender(conn, r, company) for r in rows]
     finally:
         conn.close()
@@ -233,10 +313,10 @@ def list_tenders(user=Depends(current_user), q: str = "", stage: str = "", platf
 def get_tender(tid: int, user=Depends(current_user)):
     conn = db.connect()
     try:
-        row = conn.execute("SELECT * FROM tenders WHERE id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Закупка не найдена")
-        company = db.get_company(conn)
+        company = db.get_company(conn, user["id"])
         t = row_to_tender(conn, row, company)
         events = [dict(e) for e in conn.execute(
             "SELECT * FROM events WHERE tender_id=? ORDER BY id DESC", (tid,)).fetchall()]
@@ -252,20 +332,20 @@ class PatchIn(BaseModel):
 
 
 @app.patch("/api/tenders/{tid}")
-def patch_tender(tid: int, data: PatchIn, user=Depends(current_user)):
+def patch_tender(tid: int, data: PatchIn, user=Depends(editor_user)):
     conn = db.connect()
     try:
-        row = conn.execute("SELECT * FROM tenders WHERE id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Не найдено")
         if data.stage:
             names = {s["id"]: s["name"] for s in STAGES}
             if data.stage not in names:
                 raise HTTPException(400, "Неизвестный этап")
-            conn.execute("UPDATE tenders SET stage=? WHERE id=?", (data.stage, tid))
+            conn.execute("UPDATE tenders SET stage=? WHERE id=? AND user_id=?", (data.stage, tid, user["id"]))
             db.add_event(conn, tid, "stage", f"Этап изменён: {names[data.stage]}")
         if data.note is not None:
-            conn.execute("UPDATE tenders SET note=? WHERE id=?", (data.note, tid))
+            conn.execute("UPDATE tenders SET note=? WHERE id=? AND user_id=?", (data.note, tid, user["id"]))
             db.add_event(conn, tid, "note", "Заметка обновлена")
         conn.commit()
         return {"ok": True}
@@ -278,13 +358,13 @@ class MarginIn(BaseModel):
 
 
 @app.post("/api/tenders/{tid}/margin")
-def recalc_margin(tid: int, data: MarginIn, user=Depends(current_user)):
+def recalc_margin(tid: int, data: MarginIn, user=Depends(editor_user)):
     conn = db.connect()
     try:
-        row = conn.execute("SELECT * FROM tenders WHERE id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Не найдено")
-        company = db.get_company(conn)
+        company = db.get_company(conn, user["id"])
         t = dict(row)
         return {"margin": scoring.compute_margin(company, t, data.overrides or {})}
     finally:
@@ -298,15 +378,15 @@ class AnalyzeIn(BaseModel):
 
 
 @app.post("/api/tenders/{tid}/analyze")
-async def analyze_tender(tid: int, data: AnalyzeIn = AnalyzeIn(), user=Depends(current_user)):
+async def analyze_tender(tid: int, data: AnalyzeIn = AnalyzeIn(), user=Depends(editor_user)):
     conn = db.connect()
     try:
-        row = conn.execute("SELECT * FROM tenders WHERE id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
         if not row:
             raise HTTPException(404, "Не найдено")
-        company = db.get_company(conn)
-        cfg_masked = db.get_ai_settings(conn)
-        cfg = db.get_ai_settings(conn, mask=False)
+        company = db.get_company(conn, user["id"])
+        cfg_masked = db.get_ai_settings(conn, uid=user["id"])
+        cfg = db.get_ai_settings(conn, mask=False, uid=user["id"])
     finally:
         conn.close()
 
@@ -345,8 +425,9 @@ async def analyze_tender(tid: int, data: AnalyzeIn = AnalyzeIn(), user=Depends(c
     conn = db.connect()
     try:
         conn.execute(
-            "UPDATE tenders SET analysis=?, analysis_source=?, analyzed_at=? WHERE id=?",
-            (json.dumps(analysis, ensure_ascii=False), analysis.get("source", "heuristic"), db.now_iso(), tid),
+            "UPDATE tenders SET analysis=?, analysis_source=?, analyzed_at=? WHERE id=? AND user_id=?",
+            (json.dumps(analysis, ensure_ascii=False), analysis.get("source", "heuristic"), db.now_iso(), tid,
+             user["id"]),
         )
         conn.commit()
         db.add_event(conn, tid, "ai",
@@ -485,7 +566,7 @@ class ParseIn(BaseModel):
 
 
 @app.post("/api/tenders/parse")
-async def parse_tender(data: ParseIn, user=Depends(current_user)):
+async def parse_tender(data: ParseIn, user=Depends(editor_user)):
     text = data.text or ""
     note = None
     if data.url:
@@ -508,16 +589,16 @@ async def parse_tender(data: ParseIn, user=Depends(current_user)):
 
     conn = db.connect()
     try:
-        company = db.get_company(conn)
+        company = db.get_company(conn, user["id"])
         f = guess_fields(text, company)
         cur = conn.execute(
-            """INSERT INTO tenders (ext_id, platform, law, category, title, customer, customer_inn, region, okpd,
-               qty, unit, sum, published, deadline, delivery_days, payment_terms, bid_security_pct,
-               contract_security_pct, penalty, description, tz_text, requirements, files, source_url,
-               ingested, stage, manual, created_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            """INSERT INTO tenders (user_id, ext_id, platform, law, category, title, customer, customer_inn,
+               region, okpd, qty, unit, sum, published, deadline, delivery_days, payment_terms,
+               bid_security_pct, contract_security_pct, penalty, description, tz_text, requirements, files,
+               source_url, ingested, stage, manual, created_at)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
-                f.get("ext_id") or f"MANUAL-{int(datetime.now().timestamp())}",
+                user["id"], f.get("ext_id") or f"MANUAL-{int(datetime.now().timestamp())}",
                 f["platform"], f["law"], f["category"], f["title"], f.get("customer") or "Не определён",
                 "", f["region"], f.get("okpd") or "", 1, "компл", f.get("sum") or 0,
                 datetime.now(timezone.utc).strftime("%Y-%m-%d"),
@@ -530,7 +611,7 @@ async def parse_tender(data: ParseIn, user=Depends(current_user)):
         tid = cur.lastrowid
         conn.commit()
         db.add_event(conn, tid, "parse", "Закупка добавлена вручную и распознана парсером")
-        row = conn.execute("SELECT * FROM tenders WHERE id=?", (tid,)).fetchone()
+        row = conn.execute("SELECT * FROM tenders WHERE id=? AND user_id=?", (tid, user["id"])).fetchone()
         tender = row_to_tender(conn, row, company)
     finally:
         conn.close()
@@ -538,7 +619,7 @@ async def parse_tender(data: ParseIn, user=Depends(current_user)):
 
 
 @app.post("/api/tenders/parse-file")
-async def parse_file(file: UploadFile = File(...), user=Depends(current_user)):
+async def parse_file(file: UploadFile = File(...), user=Depends(editor_user)):
     blob = await file.read()
     name = (file.filename or "").lower()
     try:
@@ -557,17 +638,16 @@ async def parse_file(file: UploadFile = File(...), user=Depends(current_user)):
 
 # ---------------- мониторинг площадок ----------------
 @app.post("/api/sync")
-def sync_platforms(user=Depends(current_user), payload: dict = None):
+def sync_platforms(user=Depends(editor_user), payload: dict = None):
     platforms = (payload or {}).get("platforms") or []
     conn = db.connect()
     try:
-        q = "SELECT * FROM tenders WHERE ingested=0"
-        rows = conn.execute(q).fetchall()
+        rows = conn.execute("SELECT * FROM tenders WHERE user_id=? AND ingested=0", (user["id"],)).fetchall()
         found = []
         for r in rows:
             if platforms and r["platform"] not in platforms:
                 continue
-            conn.execute("UPDATE tenders SET ingested=1 WHERE id=?", (r["id"],))
+            conn.execute("UPDATE tenders SET ingested=1 WHERE id=? AND user_id=?", (r["id"], user["id"]))
             db.add_event(conn, r["id"], "found",
                          f"Закупка найдена на площадке {PLATFORM_BY_ID.get(r['platform'], {}).get('name', r['platform'])}")
             found.append({"id": r["id"], "title": r["title"], "platform": r["platform"], "sum": r["sum"]})
@@ -586,7 +666,7 @@ def activity(user=Depends(current_user), limit: int = 30):
     try:
         rows = conn.execute(
             """SELECT e.*, t.title FROM events e JOIN tenders t ON t.id=e.tender_id
-               ORDER BY e.id DESC LIMIT ?""", (limit,)).fetchall()
+               WHERE t.user_id=? ORDER BY e.id DESC LIMIT ?""", (user["id"], limit)).fetchall()
         sync = conn.execute("SELECT * FROM sync_log ORDER BY id DESC LIMIT 5").fetchall()
     finally:
         conn.close()
@@ -597,8 +677,8 @@ def activity(user=Depends(current_user), limit: int = 30):
 def stats(user=Depends(current_user)):
     conn = db.connect()
     try:
-        company = db.get_company(conn)
-        rows = conn.execute("SELECT * FROM tenders").fetchall()
+        company = db.get_company(conn, user["id"])
+        rows = conn.execute("SELECT * FROM tenders WHERE user_id=?", (user["id"],)).fetchall()
         items = [row_to_tender(conn, r, company) for r in rows]
     finally:
         conn.close()
@@ -642,26 +722,183 @@ def stats(user=Depends(current_user)):
     }
 
 
+
+# ---------------- панель администратора ----------------
+class UserPatch(BaseModel):
+    name: Optional[str] = None
+    role: Optional[str] = None
+    status: Optional[str] = None
+    company_name: Optional[str] = None
+    email: Optional[str] = None
+    password: Optional[str] = None
+
+
+class AdminUserIn(BaseModel):
+    email: str
+    password: str
+    name: str = ""
+    role: str = "manager"
+    status: str = "active"
+    company_name: str = ""
+
+
+@app.get("/api/admin/overview")
+def admin_overview(user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        users = db.users_overview(conn)
+        tenders = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
+        analyzed = conn.execute("SELECT COUNT(*) c FROM tenders WHERE analysis IS NOT NULL").fetchone()["c"]
+        events = conn.execute("SELECT COUNT(*) c FROM events").fetchone()["c"]
+        logs = conn.execute("SELECT COUNT(*) c FROM ingest_log").fetchone()["c"]
+        reg = db.registration_settings(conn)
+        recent = [dict(r) for r in conn.execute(
+            "SELECT * FROM ingest_log ORDER BY id DESC LIMIT 12").fetchall()]
+    finally:
+        conn.close()
+    return {
+        "users": users,
+        "registration": reg,
+        "roles": db.ROLES,
+        "statuses": db.STATUSES,
+        "totals": {
+            "users": len(users),
+            "pending": sum(1 for u in users if u["status"] == "pending"),
+            "active": sum(1 for u in users if u["status"] == "active"),
+            "blocked": sum(1 for u in users if u["status"] == "blocked"),
+            "tenders": tenders,
+            "analyzed": analyzed,
+            "events": events,
+            "logs": logs,
+        },
+        "recent_logs": recent,
+    }
+
+
+@app.post("/api/admin/users")
+def admin_create_user(data: AdminUserIn, user=Depends(admin_user)):
+    if data.role not in db.ROLES:
+        raise HTTPException(400, "Неизвестная роль")
+    if len(data.password or "") < 6:
+        raise HTTPException(400, "Пароль должен быть не короче 6 символов")
+    conn = db.connect()
+    try:
+        if db.user_by_email(conn, data.email):
+            raise HTTPException(409, "Пользователь с таким e-mail уже есть")
+        u = db.create_user(conn, data.email, data.password, data.name or data.email,
+                           role=data.role, status=data.status, company_name=data.company_name)
+        seed_company = json.loads(json.dumps(db.DEFAULT_COMPANY, ensure_ascii=False))
+        seed_company.update(json.loads(json.dumps(db.DEMO_COMPANY, ensure_ascii=False)))
+        if data.company_name:
+            seed_company["name"] = data.company_name
+        conn.execute("INSERT OR REPLACE INTO company (user_id, data) VALUES (?,?)",
+                     (u["id"], json.dumps(seed_company, ensure_ascii=False)))
+        conn.commit()
+        return {"ok": True, "user": {k: u[k] for k in ("id", "email", "name", "role", "status")}}
+    finally:
+        conn.close()
+
+
+@app.patch("/api/admin/users/{uid}")
+def admin_patch_user(uid: int, data: UserPatch, user=Depends(admin_user)):
+    if uid == user["id"] and data.status and data.status != "active":
+        raise HTTPException(400, "Нельзя заблокировать самого себя")
+    conn = db.connect()
+    try:
+        target = db.user_by_id(conn, uid)
+        if not target:
+            raise HTTPException(404, "Пользователь не найден")
+        patch = {k: v for k, v in data.model_dump().items() if v is not None}
+        if patch.get("role") and patch["role"] not in db.ROLES:
+            raise HTTPException(400, "Неизвестная роль")
+        if patch.get("status") and patch["status"] not in db.STATUSES:
+            raise HTTPException(400, "Неизвестный статус")
+        if patch.get("email"):
+            patch["email"] = patch["email"].strip().lower()
+            other = db.user_by_email(conn, patch["email"])
+            if other and other["id"] != uid:
+                raise HTTPException(409, "Этот e-mail занят другим пользователем")
+        updated = db.update_user(conn, uid, patch)
+        if patch.get("status") == "blocked":
+            conn.execute("DELETE FROM sessions WHERE user_id=?", (uid,))
+            conn.commit()
+        return {"ok": True, "user": {k: updated[k] for k in
+                                     ("id", "email", "name", "role", "status", "company_name")}}
+    finally:
+        conn.close()
+
+
+@app.delete("/api/admin/users/{uid}")
+def admin_delete_user(uid: int, user=Depends(admin_user)):
+    if uid == user["id"]:
+        raise HTTPException(400, "Нельзя удалить свою учётную запись")
+    conn = db.connect()
+    try:
+        if not db.user_by_id(conn, uid):
+            raise HTTPException(404, "Пользователь не найден")
+        db.delete_user(conn, uid)
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
+class AdminRegistration(BaseModel):
+    open: Optional[bool] = None
+    require_approval: Optional[bool] = None
+    default_role: Optional[str] = None
+
+
+@app.put("/api/admin/registration")
+def admin_registration(data: AdminRegistration, user=Depends(admin_user)):
+    conn = db.connect()
+    try:
+        cfg = db.set_registration_settings(conn, {k: v for k, v in data.model_dump().items() if v is not None})
+        return {"ok": True, "registration": cfg}
+    finally:
+        conn.close()
+
+
+class PasswordIn(BaseModel):
+    old_password: str
+    new_password: str
+
+
+@app.post("/api/me/password")
+def change_password(data: PasswordIn, user=Depends(current_user)):
+    if len(data.new_password or "") < 6:
+        raise HTTPException(400, "Новый пароль должен быть не короче 6 символов")
+    conn = db.connect()
+    try:
+        row = db.user_by_id(conn, user["id"])
+        if row["pass_hash"] != db.hash_pass(data.old_password):
+            raise HTTPException(400, "Старый пароль неверен")
+        db.update_user(conn, user["id"], {"password": data.new_password})
+        return {"ok": True}
+    finally:
+        conn.close()
+
+
 # ---------------- источники данных (реальный сбор) ----------------
 @app.get("/api/sources")
 def sources_list(user=Depends(current_user)):
     conn = db.connect()
     try:
-        return {"sources": ingest.get_sources(conn), "schedule": scheduler.get_schedule(conn)}
+        return {"sources": ingest.get_sources(conn, user["id"]), "schedule": scheduler.get_schedule(conn, user["id"])}
     finally:
         conn.close()
 
 
 @app.put("/api/sources")
-def sources_put(payload: dict, user=Depends(current_user)):
+def sources_put(payload: dict, user=Depends(editor_user)):
     conn = db.connect()
     try:
         items = payload.get("sources")
         if isinstance(items, list):
-            ingest.save_sources(conn, items)
+            ingest.save_sources(conn, items, user["id"])
         if isinstance(payload.get("schedule"), dict):
-            scheduler.set_schedule(conn, payload["schedule"])
-        return {"ok": True, "sources": ingest.get_sources(conn), "schedule": scheduler.get_schedule(conn)}
+            scheduler.set_schedule(conn, payload["schedule"], user["id"])
+        return {"ok": True, "sources": ingest.get_sources(conn, user["id"]),
+                "schedule": scheduler.get_schedule(conn, user["id"])}
     finally:
         conn.close()
 
@@ -672,17 +909,17 @@ class RunSourceIn(BaseModel):
 
 
 @app.post("/api/sources/run")
-async def sources_run(data: RunSourceIn = RunSourceIn(), user=Depends(current_user)):
+async def sources_run(data: RunSourceIn = RunSourceIn(), user=Depends(editor_user)):
     conn = db.connect()
     try:
-        before = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
-        results = await ingest.run_all(conn, data.ids)
-        after = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
+        before = conn.execute("SELECT COUNT(*) c FROM tenders WHERE user_id=?", (user["id"],)).fetchone()["c"]
+        results = await ingest.run_all(conn, data.ids, uid=user["id"])
+        after = conn.execute("SELECT COUNT(*) c FROM tenders WHERE user_id=?", (user["id"],)).fetchone()["c"]
         analyzed = 0
         if data.analyze and after > before:
-            company = db.get_company(conn)
-            cfg = db.get_ai_settings(conn)
-            analyzed = ingest.auto_analyze_new(conn, company, cfg)
+            company = db.get_company(conn, user["id"])
+            cfg = db.get_ai_settings(conn, uid=user["id"])
+            analyzed = ingest.auto_analyze_new(conn, company, cfg, user["id"])
         return {"results": results, "new": after - before, "analyzed": analyzed}
     finally:
         conn.close()
@@ -692,7 +929,8 @@ async def sources_run(data: RunSourceIn = RunSourceIn(), user=Depends(current_us
 def logs(user=Depends(current_user), limit: int = 60):
     conn = db.connect()
     try:
-        rows = conn.execute("SELECT * FROM ingest_log ORDER BY id DESC LIMIT ?", (limit,)).fetchall()
+        rows = conn.execute("SELECT * FROM ingest_log WHERE user_id=? ORDER BY id DESC LIMIT ?",
+                            (user["id"], limit)).fetchall()
         inbox_files = []
         if os.path.isdir(ingest.INBOX):
             for f in sorted(os.listdir(ingest.INBOX)):
@@ -705,7 +943,7 @@ def logs(user=Depends(current_user), limit: int = 60):
 
 
 @app.post("/api/ingest/upload")
-async def ingest_upload(file: UploadFile = File(...), user=Depends(current_user)):
+async def ingest_upload(file: UploadFile = File(...), user=Depends(editor_user)):
     """Загрузка файла выгрузки: XML ЕИС, CSV/Excel-выгрузка ЭТП, ZIP-архив."""
     ingest.ensure_dirs()
     name = (file.filename or "upload.bin").replace("/", "_").replace("\\", "_")
@@ -741,36 +979,37 @@ async def ingest_upload(file: UploadFile = File(...), user=Depends(current_user)
     try:
         added = 0
         for t in items:
-            if ingest.save_tender(conn, t):
+            if ingest.save_tender(conn, t, user["id"]):
                 added += 1
         conn.commit()
-        ingest.log(conn, "upload", "ok", f"{name}: распознано {len(items)}, новых {added}", len(items), added)
-        company = db.get_company(conn)
-        cfg = db.get_ai_settings(conn)
-        analyzed = ingest.auto_analyze_new(conn, company, cfg) if added else 0
+        ingest.log(conn, "upload", "ok", f"{name}: распознано {len(items)}, новых {added}", len(items), added,
+                   user["id"])
+        company = db.get_company(conn, user["id"])
+        cfg = db.get_ai_settings(conn, uid=user["id"])
+        analyzed = ingest.auto_analyze_new(conn, company, cfg, user["id"]) if added else 0
     finally:
         conn.close()
     return {"file": name, "recognized": len(items), "added": added, "analyzed": analyzed}
 
 
 @app.post("/api/ingest/scan-inbox")
-def scan_inbox(user=Depends(current_user)):
+def scan_inbox(user=Depends(editor_user)):
     conn = db.connect()
     try:
         ingest.ensure_dirs()
         res = src_mod.parse_files_in_inbox(ingest.INBOX, ingest.PROCESSED)
         added = 0
         for t in res["items"]:
-            if ingest.save_tender(conn, t):
+            if ingest.save_tender(conn, t, user["id"]):
                 added += 1
         conn.commit()
         ingest.log(conn, "inbox", "ok" if not res["errors"] else "warn",
                    f"файлов {len(res['files'])}, распознано {len(res['items'])}, новых {added}"
                    + ("; ошибки: " + "; ".join(res["errors"][:3]) if res["errors"] else ""),
-                   len(res["items"]), added)
-        company = db.get_company(conn)
-        cfg = db.get_ai_settings(conn)
-        analyzed = ingest.auto_analyze_new(conn, company, cfg) if added else 0
+                   len(res["items"]), added, user["id"])
+        company = db.get_company(conn, user["id"])
+        cfg = db.get_ai_settings(conn, uid=user["id"])
+        analyzed = ingest.auto_analyze_new(conn, company, cfg, user["id"]) if added else 0
         return {"files": res["files"], "recognized": len(res["items"]), "added": added,
                 "analyzed": analyzed, "errors": res["errors"]}
     finally:
@@ -810,26 +1049,26 @@ async def sources_check(user=Depends(current_user)):
 def notify_get(user=Depends(current_user)):
     conn = db.connect()
     try:
-        return {"notify": notify.get_notify(conn)}
+        return {"notify": notify.get_notify(conn, uid=user["id"])}
     finally:
         conn.close()
 
 
 @app.put("/api/notify")
-def notify_put(payload: dict, user=Depends(current_user)):
+def notify_put(payload: dict, user=Depends(editor_user)):
     conn = db.connect()
     try:
-        notify.set_notify(conn, payload or {})
-        return {"ok": True, "notify": notify.get_notify(conn)}
+        notify.set_notify(conn, payload or {}, user["id"])
+        return {"ok": True, "notify": notify.get_notify(conn, uid=user["id"])}
     finally:
         conn.close()
 
 
 @app.post("/api/notify/test")
-async def notify_test(user=Depends(current_user)):
+async def notify_test(user=Depends(editor_user)):
     conn = db.connect()
     try:
-        cfg = notify.get_notify(conn, mask=False)
+        cfg = notify.get_notify(conn, mask=False, uid=user["id"])
     finally:
         conn.close()
     text = "🔔 TenderPilot: уведомления настроены. Сюда будут приходить закупки с вердиктом «идём»."

@@ -43,46 +43,85 @@ async function api(path, opts = {}) {
   return data;
 }
 
-/* ================= LOGIN ================= */
-function renderLogin() {
+/* ================= LOGIN / РЕГИСТРАЦИЯ ================= */
+function renderLogin(mode = 'login', pendingMsg = '') {
+  const isReg = mode === 'register';
   document.getElementById('root').innerHTML = `
   <div class="login-wrap">
     <div class="login-art">
       <div>
         <div class="logo" style="margin-bottom:38px"><span class="logo-mark">TP</span> TenderPilot</div>
         <h1>Тендеры находит ИИ.<br>Завод решает<i style="color:#60a5fa">, что взять в работу</i>.</h1>
-        <p>Закрытая платформа для владельца завода: настраиваете номенклатуру один раз — дальше система сама мониторит ЕИС, Росэлторг, B2B-Center, ЭТП ГПБ и закупки корпораций.</p>
+        <p>Закрытая платформа для завода: настраиваете номенклатуру один раз — дальше система сама мониторит ЕИС, Росэлторг, B2B-Center, ЭТП ГПБ и закупки корпораций.</p>
         <div class="login-feats">
           <div class="login-feat"><span class="lico">◎</span><div><b>Мониторинг всех площадок</b><br>44-ФЗ, 223-ФЗ и коммерческие закупки — в одной ленте</div></div>
           <div class="login-feat"><span class="lico">✳</span><div><b>ИИ читает ТЗ и файлы</b><br>Сверяет требования с вашим профилем и находит «заточки»</div></div>
           <div class="login-feat"><span class="lico">₽</span><div><b>Маржа и риски до подачи</b><br>Себестоимость, обеспечение, кассовый разрыв, вероятность победы</div></div>
         </div>
       </div>
-      <div style="color:#63799c;font-size:12px;position:relative;z-index:2">Демо-доступ: owner@zavod.ru / demo1234</div>
+      <div style="color:#63799c;font-size:12px;position:relative;z-index:2">Закрытый доступ · регистрация с подтверждением администратором</div>
     </div>
     <div class="login-form-side">
       <div class="login-card">
-        <div class="logo" style="margin-bottom:26px"><span class="logo-mark">TP</span> TenderPilot</div>
+        <div class="logo" style="margin-bottom:20px"><span class="logo-mark">TP</span> TenderPilot</div>
+        <div class="tabs" style="display:flex;gap:6px;margin-bottom:18px;background:var(--line-2);padding:4px;border-radius:10px">
+          <button class="btn sm ${isReg ? '' : 'primary'}" data-mode="login" style="flex:1;justify-content:center">Вход</button>
+          <button class="btn sm ${isReg ? 'primary' : ''}" data-mode="register" style="flex:1;justify-content:center">Регистрация</button>
+        </div>
+        ${pendingMsg ? `<div class="card" style="box-shadow:none;border-color:var(--warn);background:#fff8ec;margin-bottom:14px"><div class="card-body" style="padding:12px 14px;font-size:13px">${esc(pendingMsg)}</div></div>` : ''}
+        ${isReg ? `
+        <h2 style="margin:0 0 6px;font-size:21px;letter-spacing:-.4px">Создать доступ</h2>
+        <p class="muted tiny" style="margin:0 0 18px">Заявка уйдёт администратору — он подтвердит доступ</p>
+        <form id="registerForm">
+          <div class="field"><label>Ваше имя</label><input name="name" placeholder="Иван Петров" required></div>
+          <div class="field"><label>Название завода или компании</label><input name="company_name" placeholder="ООО «ПромАрматура»"></div>
+          <div class="field"><label>Email</label><input type="email" name="email" placeholder="ivan@zavod.ru" required></div>
+          <div class="field"><label>Пароль</label><input type="password" name="password" minlength="6" placeholder="минимум 6 символов" required></div>
+          <button class="btn primary block" type="submit" style="margin-top:6px">Отправить заявку</button>
+          <div class="hint" style="margin-top:12px">У каждого пользователя своя лента закупок и свой профиль завода.</div>
+        </form>` : `
         <h2 style="margin:0 0 6px;font-size:22px;letter-spacing:-.4px">Вход в систему</h2>
-        <p class="muted tiny" style="margin:0 0 22px">Личный кабинет владельца завода</p>
+        <p class="muted tiny" style="margin:0 0 22px">Личный кабинет завода</p>
         <form id="loginForm">
           <div class="field"><label>Email</label><input type="email" name="email" value="owner@zavod.ru" required></div>
           <div class="field"><label>Пароль</label><input type="password" name="password" value="demo1234" required></div>
           <button class="btn primary block" type="submit" style="margin-top:6px">Войти</button>
-          <div class="hint" style="text-align:center;margin-top:14px">Демо: owner@zavod.ru / demo1234</div>
-        </form>
+          <div class="hint" style="text-align:center;margin-top:14px">Демо-администратор: owner@zavod.ru / demo1234</div>
+        </form>`}
       </div>
     </div>
   </div>`;
-  $('#loginForm').addEventListener('submit', async (e) => {
+  $$('[data-mode]').forEach((b) => b.addEventListener('click', () => renderLogin(b.dataset.mode)));
+  $('#loginForm')?.addEventListener('submit', async (e) => {
     e.preventDefault();
     const f = new FormData(e.target);
     try {
       const res = await api('/login', { method: 'POST', body: JSON.stringify({ email: f.get('email'), password: f.get('password') }) });
       state.user = res.user;
       await boot(true);
-    } catch (err) { toast(err.message, 'err'); }
+    } catch (err) { toast(err.message, 'err', 8000); }
   });
+  $('#registerForm')?.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const body = Object.fromEntries(f.entries());
+    try {
+      const res = await api('/register', { method: 'POST', body: JSON.stringify(body) });
+      renderLogin('login', res.message || 'Заявка принята.');
+    } catch (err) { toast(err.message, 'err', 8000); }
+  });
+}
+
+
+async function changePassword() {
+  const oldPwd = prompt('Текущий пароль:');
+  if (!oldPwd) return;
+  const newPwd = prompt('Новый пароль (минимум 6 символов):');
+  if (!newPwd) return;
+  try {
+    await api('/me/password', { method: 'POST', body: JSON.stringify({ old_password: oldPwd, new_password: newPwd }) });
+    toast('Пароль изменён', 'ok');
+  } catch (e) { toast(e.message, 'err', 8000); }
 }
 
 /* ================= SHELL ================= */
@@ -94,6 +133,7 @@ const NAV = [
   { sep: 'Настройка' },
   { id: 'profile', name: 'Профиль завода', ico: '⚙' },
   { id: 'ai', name: 'Настройки ИИ', ico: '✳' },
+  { id: 'admin', name: 'Администрирование', ico: '▦', adminOnly: true },
 ];
 
 function renderShell() {
@@ -108,7 +148,7 @@ function renderShell() {
         <div style="font-size:11px;color:#7f92b3">${esc(c.name || 'Профиль не настроен')}</div></div>
       </div>
       <div class="side-nav">
-        ${NAV.map((n) => n.sep ? `<div class="side-label">${n.sep}</div>` :
+        ${NAV.filter((n) => !n.adminOnly || state.user?.role === 'owner').map((n) => n.sep ? `<div class="side-label">${n.sep}</div>` :
           `<div class="nav-item" data-nav="${n.id}"><span style="width:18px;text-align:center;opacity:.85">${n.ico}</span>${n.name}<span class="badge" data-badge="${n.id}" style="display:none">0</span></div>`).join('')}
       </div>
       <div class="side-foot">
@@ -124,8 +164,10 @@ function renderShell() {
           <div style="line-height:1.2;font-size:12px;min-width:0">
             <div style="color:#dbe5f5;overflow:hidden;text-overflow:ellipsis">${esc(state.user?.name || '')}</div>
             <div style="color:#7f92b3">${esc(state.user?.email || '')}</div>
+            <div style="color:#5f7398;font-size:10.5px;margin-top:1px">${esc(ROLE_NAMES[state.user?.role] || 'Пользователь')}</div>
           </div>
-          <button class="btn ghost sm" data-act="logout" style="margin-left:auto;color:#8fa3c4">⎋</button>
+          <button class="btn ghost sm" data-act="password" style="margin-left:auto;color:#8fa3c4" title="Сменить пароль">ключ</button>
+          <button class="btn ghost sm" data-act="logout" style="color:#8fa3c4" title="Выйти">⎋</button>
         </div>
       </div>
     </aside>
@@ -157,6 +199,7 @@ function bindShell() {
 async function handleAction(e) {
   const act = e.currentTarget.dataset.act;
   if (act === 'logout') { await api('/logout', { method: 'POST' }); state.user = null; renderLogin(); }
+  if (act === 'password') await changePassword();
   if (act === 'menu') $('#side')?.classList.toggle('open');
   if (act === 'scan') await scanPlatforms();
   if (act === 'analyze-new') await analyzeNew();
@@ -1263,6 +1306,133 @@ function bindSources() {
   });
 }
 
+
+/* ================= ADMIN ================= */
+const ROLE_NAMES = { owner: 'Администратор', manager: 'Менеджер по тендерам', viewer: 'Наблюдатель' };
+const STATUS_NAMES = { pending: 'Ожидает подтверждения', active: 'Активен', blocked: 'Заблокирован' };
+
+async function renderAdmin() {
+  const content = $('#content');
+  content.innerHTML = `<div class="page-head"><div><h2>Администрирование</h2><p>Пользователи, доступы и регистрация</p></div></div>
+    <div class="card"><div class="card-body"><div class="skel" style="height:260px"></div></div></div>`;
+  let d;
+  try { d = await api('/admin/overview'); }
+  catch (e) { content.innerHTML = `<div class="empty">${esc(e.message)}</div>`; return; }
+  state.admin = d;
+  const t = d.totals;
+  const badge = (s) => `<span class="pill" style="background:${s === 'active' ? 'var(--ok-soft, #e7f7ee)' : s === 'pending' ? '#fff4e0' : '#fdeaea'};color:${s === 'active' ? 'var(--ok)' : s === 'pending' ? '#b26a00' : 'var(--bad)'}">${STATUS_NAMES[s] || s}</span>`;
+  content.innerHTML = `
+  <div class="page-head">
+    <div><h2>Администрирование</h2><p>Пользователи, доступы и регистрация</p></div>
+    <div class="spacer"></div>
+    <button class="btn primary" data-new-user>+ Создать пользователя</button>
+  </div>
+
+  <div class="grid kpis" style="margin-bottom:16px">
+    <div class="kpi accent"><div class="lbl">Пользователей</div><div class="val">${t.users}</div><div class="sub">активных ${t.active} · ждут ${t.pending} · блокировано ${t.blocked}</div></div>
+    <div class="kpi ${t.pending ? 'warn' : ''}"><div class="lbl">Заявок на доступ</div><div class="val">${t.pending}</div><div class="sub">${t.pending ? 'требуют вашего решения' : 'очередь пуста'}</div></div>
+    <div class="kpi"><div class="lbl">Закупок в системе</div><div class="val">${t.tenders}</div><div class="sub">с заключением ИИ ${t.analyzed}</div></div>
+    <div class="kpi"><div class="lbl">Событий и сборов</div><div class="val">${t.events + t.logs}</div><div class="sub">записей журнала площадок ${t.logs}</div></div>
+  </div>
+
+  <div class="card" style="margin-bottom:16px">
+    <div class="card-head">Пользователи <span class="muted tiny" style="font-weight:400">каждый со своей лентой и профилем завода</span></div>
+    <div class="card-body" style="padding:0">
+      <div class="table-wrap"><table class="t">
+        <thead><tr><th>Пользователь</th><th>Роль</th><th>Статус</th><th>Закупки</th><th>Последний вход</th><th style="text-align:right">Действия</th></tr></thead>
+        <tbody>${d.users.map((u) => `
+          <tr>
+            <td>
+              <div style="display:flex;gap:9px;align-items:center">
+                <div style="width:30px;height:30px;border-radius:9px;background:var(--brand-soft);color:var(--brand);display:grid;place-items:center;font-weight:700;font-size:12.5px">${esc((u.name || u.email).slice(0, 2).toUpperCase())}</div>
+                <div style="min-width:0">
+                  <div style="font-weight:600;font-size:13px">${esc(u.name || '—')}${u.id === state.user.id ? ' <span class="tiny muted">(вы)</span>' : ''}</div>
+                  <div class="tiny muted">${esc(u.email)}${u.company_name ? ' · ' + esc(u.company_name) : ''}</div>
+                </div>
+              </div>
+            </td>
+            <td><select data-role="${u.id}" ${u.id === state.user.id ? 'disabled' : ''} style="padding:5px 8px;border:1px solid var(--line);border-radius:8px;font-size:12.5px">
+              ${Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${u.role === k ? 'selected' : ''}>${v}</option>`).join('')}
+            </select></td>
+            <td>${badge(u.status)}</td>
+            <td class="num">${u.tenders}<span class="tiny muted"> / ИИ ${u.analyzed}</span></td>
+            <td class="tiny muted">${u.last_login_at ? esc(u.last_login_at.replace('T', ' ').slice(0, 16)) : 'не входил'}</td>
+            <td style="text-align:right;white-space:nowrap">
+              ${u.status === 'pending' ? `<button class="btn sm primary" data-approve="${u.id}">Подтвердить</button> ` : ''}
+              ${u.id !== state.user.id ? `
+                ${u.status === 'blocked' ? `<button class="btn sm" data-unblock="${u.id}">Разблокировать</button>` : `<button class="btn sm" data-block="${u.id}">Заблокировать</button>`}
+                <button class="btn sm ghost" data-reset="${u.id}" title="Сбросить пароль">пароль</button>
+                <button class="btn sm ghost" data-del="${u.id}" title="Удалить со всеми данными" style="color:var(--bad)">✕</button>` : ''}
+            </td>
+          </tr>`).join('')}</tbody>
+      </table></div>
+    </div>
+  </div>
+
+  <div class="grid" style="grid-template-columns:minmax(0,420px) minmax(0,1fr);gap:14px;align-items:start">
+    <div class="card">
+      <div class="card-head">Регистрация</div>
+      <div class="card-body">
+        <div class="field"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="regOpen" ${d.registration.open ? 'checked' : ''} style="width:auto"> Регистрация открыта</label></div>
+        <div class="field" style="margin-top:10px"><label style="display:flex;gap:8px;align-items:center"><input type="checkbox" id="regApprove" ${d.registration.require_approval ? 'checked' : ''} style="width:auto"> Требовать моё подтверждение</label></div>
+        <div class="field" style="margin-top:10px"><label>Роль новым пользователям</label>
+          <select id="regRole">${Object.entries(ROLE_NAMES).map(([k, v]) => `<option value="${k}" ${d.registration.default_role === k ? 'selected' : ''}>${v}</option>`).join('')}</select></div>
+        <button class="btn primary" data-save-reg style="margin-top:12px">Сохранить</button>
+        <div class="tiny muted" style="margin-top:9px">Закрытая регистрация: новые заявки не принимаются, учётки создаёте вы вручную.</div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-head">Последние события сбора</div>
+      <div class="card-body" style="padding:0;max-height:320px;overflow:auto">
+        ${d.recent_logs.length ? d.recent_logs.map((l) => `<div style="display:flex;gap:8px;padding:8px 14px;border-bottom:1px dashed var(--line-2);font-size:12.3px">
+          <span class="muted tiny nowrap">${esc((l.created_at || '').replace('T', ' ').slice(5, 16))}</span>
+          <span style="color:${l.status === 'ok' ? 'var(--ok)' : l.status === 'error' ? 'var(--bad)' : '#b26a00'}">${esc(l.source_id)}</span>
+          <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(l.message)}</span></div>`).join('')
+          : '<div class="empty">Пусто</div>'}
+      </div>
+    </div>
+  </div>`;
+  bindAdmin();
+}
+
+function bindAdmin() {
+  const patch = async (id, body, okMsg) => {
+    try { await api('/admin/users/' + id, { method: 'PATCH', body: JSON.stringify(body) }); toast(okMsg, 'ok'); await renderAdmin(); }
+    catch (e) { toast(e.message, 'err'); }
+  };
+  $$('[data-approve]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.approve, { status: 'active' }, 'Доступ открыт')));
+  $$('[data-block]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.block, { status: 'blocked' }, 'Пользователь заблокирован')));
+  $$('[data-unblock]').forEach((b) => b.addEventListener('click', () => patch(b.dataset.unblock, { status: 'active' }, 'Доступ восстановлен')));
+  $$('[data-role]').forEach((sel) => sel.addEventListener('change', () => patch(sel.dataset.role, { role: sel.value }, 'Роль изменена')));
+  $$('[data-reset]').forEach((b) => b.addEventListener('click', () => {
+    const pwd = prompt('Новый пароль (минимум 6 символов):');
+    if (pwd) patch(b.dataset.reset, { password: pwd }, 'Пароль изменён');
+  }));
+  $$('[data-del]').forEach((b) => b.addEventListener('click', async () => {
+    if (!confirm('Удалить пользователя вместе с его лентой, профилем и настройками?')) return;
+    try { await api('/admin/users/' + b.dataset.del, { method: 'DELETE' }); toast('Пользователь удалён', 'ok'); await renderAdmin(); }
+    catch (e) { toast(e.message, 'err'); }
+  }));
+  $('[data-save-reg]')?.addEventListener('click', async () => {
+    try {
+      await api('/admin/registration', { method: 'PUT', body: JSON.stringify({
+        open: $('#regOpen').checked, require_approval: $('#regApprove').checked, default_role: $('#regRole').value,
+      }) });
+      toast('Настройки регистрации сохранены', 'ok');
+    } catch (e) { toast(e.message, 'err'); }
+  });
+  $('[data-new-user]')?.addEventListener('click', async () => {
+    const email = prompt('E-mail нового пользователя:'); if (!email) return;
+    const pwd = prompt('Пароль (минимум 6 символов):'); if (!pwd) return;
+    const name = prompt('Имя (необязательно):') || email;
+    const company = prompt('Название завода (необязательно):') || '';
+    try {
+      await api('/admin/users', { method: 'POST', body: JSON.stringify({ email, password: pwd, name, company_name: company, role: 'manager', status: 'active' }) });
+      toast('Пользователь создан', 'ok'); await renderAdmin();
+    } catch (e) { toast(e.message, 'err'); }
+  });
+}
+
 /* ================= ROUTER / BOOT ================= */
 async function route() {
   if (!state.user) return renderLogin();
@@ -1276,6 +1446,7 @@ async function route() {
   else if (view === 'ai') await renderAiSettings();
   else if (view === 'analytics') { await loadTenders(); await renderAnalytics(); }
   else if (view === 'sources') await renderSources();
+  else if (view === 'admin' && state.user?.role === 'owner') await renderAdmin();
   else await renderDashboard();
 }
 

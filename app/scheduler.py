@@ -9,48 +9,46 @@ from . import db, ingest, notify
 TASK = None
 
 
-def get_schedule(conn):
-    row = conn.execute("SELECT value FROM settings WHERE key='schedule'").fetchone()
-    cfg = {"enabled": False, "interval_minutes": 60, "notify_new": True, "auto_analyze": True}
-    if row:
-        try:
-            cfg.update(json.loads(row["value"]) or {})
-        except Exception:
-            pass
+DEFAULT_SCHEDULE = {"enabled": False, "interval_minutes": 60, "notify_new": True, "auto_analyze": True}
+
+
+def get_schedule(conn, uid=None):
+    cfg = dict(DEFAULT_SCHEDULE)
+    saved = db.get_setting(conn, "schedule", uid, default=None) or {}
+    cfg.update(saved or {})
     return cfg
 
 
-def set_schedule(conn, patch):
-    cfg = get_schedule(conn)
+def set_schedule(conn, patch, uid=None):
+    cfg = get_schedule(conn, uid)
     cfg.update(patch or {})
-    conn.execute("INSERT INTO settings (key, value) VALUES ('schedule', ?) "
-                 "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
-                 (json.dumps(cfg, ensure_ascii=False),))
-    conn.commit()
+    db.set_setting(conn, "schedule", cfg, uid)
     return cfg
 
 
-async def cycle():
-    """Один проход: сбор → отсев → уведомления."""
+async def cycle(uid=None):
+    """Один проход по одному пользователю: сбор → отсев → уведомления."""
     conn = db.connect()
     try:
-        cfg = get_schedule(conn)
-        company = db.get_company(conn)
-        ai_cfg = db.get_ai_settings(conn)
-        ncfg = notify.get_notify(conn, mask=False)
+        uid = db._uid(conn, uid)
+        cfg = get_schedule(conn, uid)
+        company = db.get_company(conn, uid)
+        ai_cfg = db.get_ai_settings(conn, uid=uid)
+        ncfg = notify.get_notify(conn, mask=False, uid=uid)
 
-        before = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
-        results = await ingest.run_all(conn)
-        after = conn.execute("SELECT COUNT(*) c FROM tenders").fetchone()["c"]
+        before = conn.execute("SELECT COUNT(*) c FROM tenders WHERE user_id=?", (uid,)).fetchone()["c"]
+        results = await ingest.run_all(conn, uid=uid)
+        after = conn.execute("SELECT COUNT(*) c FROM tenders WHERE user_id=?", (uid,)).fetchone()["c"]
         new_count = after - before
 
         if cfg.get("auto_analyze", True):
-            ingest.auto_analyze_new(conn, company, ai_cfg)
+            ingest.auto_analyze_new(conn, company, ai_cfg, uid)
 
         sent = 0
         if ncfg.get("telegram_token") and ncfg.get("telegram_chat") and cfg.get("notify_new", True) and new_count:
             from . import scoring
-            rows = conn.execute("SELECT * FROM tenders WHERE analysis IS NOT NULL ORDER BY id DESC LIMIT 10").fetchall()
+            rows = conn.execute("SELECT * FROM tenders WHERE user_id=? AND analysis IS NOT NULL "
+                                "ORDER BY id DESC LIMIT 10", (uid,)).fetchall()
             allowed = ncfg.get("only_verdicts") or ["go"]
             for row in rows:
                 t = dict(row)
@@ -64,29 +62,58 @@ async def cycle():
                 res = await notify.telegram_send(ncfg, notify.format_tender(t, os.environ.get("PUBLIC_URL", "")))
                 if res.get("ok"):
                     sent += 1
-        return {"new": new_count, "sources": results, "notified": sent}
+        return {"user": uid, "new": new_count, "sources": results, "notified": sent}
     finally:
         conn.close()
+
+
+async def cycle_all():
+    """Проходит по всем активным пользователям, у кого включено расписание."""
+    conn = db.connect()
+    try:
+        users = db.active_users(conn)
+    finally:
+        conn.close()
+    out = []
+    for u in users:
+        conn = db.connect()
+        try:
+            cfg = get_schedule(conn, u["id"])
+        finally:
+            conn.close()
+        if not cfg.get("enabled"):
+            continue
+        try:
+            out.append(await cycle(u["id"]))
+        except Exception as e:
+            conn = db.connect()
+            try:
+                ingest.log(conn, "scheduler", "error", f"{u['email']}: {e}", uid=u["id"])
+            finally:
+                conn.close()
+    return out
 
 
 async def _loop():
     while True:
         try:
             conn = db.connect()
-            cfg = get_schedule(conn)
+            users = db.active_users(conn)
+            intervals = [int(get_schedule(conn, u["id"]).get("interval_minutes") or 60)
+                         for u in users if get_schedule(conn, u["id"]).get("enabled")]
             conn.close()
-            interval = max(5, int(cfg.get("interval_minutes") or 60)) * 60
+            interval = max(5, min(intervals or [60]))
         except Exception:
             interval = 3600
         try:
-            await cycle()
+            await cycle_all()
         except Exception as e:
             conn = db.connect()
             try:
                 ingest.log(conn, "scheduler", "error", str(e))
             finally:
                 conn.close()
-        await asyncio.sleep(interval)
+        await asyncio.sleep(max(5, interval) * 60)
 
 
 def start():
